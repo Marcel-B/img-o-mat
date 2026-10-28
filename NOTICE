@@ -1,0 +1,26 @@
+img-o-mat
+Copyright (C) 2026 Marcel Benders
+
+Required Notice: Copyright (C) 2026 Marcel Benders. img-o-mat by Marcel Benders (https://github.com/Marcel-B/img-o-mat)
+
+This software is licensed under the PolyForm Noncommercial License 1.0.0
+(see LICENSE, or https://polyformproject.org/licenses/noncommercial/1.0.0).
+You may use, change and share it for any noncommercial purpose, as long as
+everyone who gets a copy from you also gets these terms and the Required
+Notice line above. Any commercial use needs the author's written
+permission; ask Marcel Benders through https://github.com/Marcel-B/img-o-mat.
+
+worker/paint.py and the model catalogue come from Tonwerk-AI
+(https://github.com/Marcel-B/Tonwerk-AI) by the same author, under the
+same licence.
+
+The licence covers this software, not the pictures made with it, nor the
+models that make them. The models are downloaded from their own sources
+and keep their own licences: FLUX.2 Klein 4B and Z-Image Turbo Apache 2.0,
+FLUX.2 Klein 9B FLUX Non-Commercial, Krea 2 Turbo Krea 2 Community, FLUX 3
+Image Klein FLUX Kommunity, Falconsai/nsfw_image_detection Apache 2.0.
+
+Third-party software, installed by install-worker.sh on the Mac that paints
+and not shipped with this repository: mflux (MIT), flux3-mlx (Apache 2.0),
+Pillow (MIT-CMU), PyTorch (BSD-3-Clause) and their dependencies. The
+service itself uses only Python's standard library.
