@@ -88,6 +88,20 @@ class Service:
         probe = self.probe(fresh)
         return [self.catalogue.describe(m, probe, self.link.probe_error, states[m["id"]]) for m in self.catalogue.models]
 
+    def busy(self) -> dict:
+        """What paints now, for Tonwerk before it claims the Mac's memory: pictures that came through the gate are
+        invisible to it otherwise. No probe, so it is cheap enough to ask before every claim."""
+        running = self.painter.status()["running"]
+        model = self.catalogue.find(running["model"]) if running else None
+        return {
+            "busy": running is not None,
+            "app": running["app"] if running else None,
+            "model": running["model"] if running else None,
+            "memoryGb": model["memoryGb"] if model else 0,
+            "since": running["since"] if running else None,
+            "waiting": len(self.painter.status()["queue"]),
+        }
+
     def status(self) -> dict:
         probe = self.probe()
         return {
@@ -322,6 +336,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, {"object": "list", "data": service.models(fresh=query.get("fresh") == "1")})
         elif path == "/status":
             self.send_json(200, service.status())
+        elif path == "/v1/busy":
+            self.send_json(200, service.busy())
         elif path == "/v1/loras":
             self.send_json(200, service.loras.list())
         else:

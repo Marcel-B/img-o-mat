@@ -241,6 +241,9 @@ class ServiceTest(unittest.TestCase):
         painter.submit(late)
         painter.submit(urgent)
         self.assertEqual([j["app"] for j in painter.status()["queue"]], ["tonwerk-ai", "gate-app"])
+        status, busy, _ = self.call("GET", "/v1/busy")
+        self.assertEqual((status, busy["busy"], busy["app"], busy["model"], busy["waiting"]), (200, True, "a", "klein-4b", 2))
+        self.assertGreater(busy["memoryGb"], 0)
         for job in (late, urgent, blocker):
             painter.cancel(job)
 

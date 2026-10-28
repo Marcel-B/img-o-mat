@@ -53,6 +53,7 @@ OpenAI-kompatibel, wo OpenAI etwas hat, also gehen auch dessen Clients. Fehler h
 | `DELETE /v1/jobs/<id>` | ein Bild abbrechen (die Kennung steht in `X-Img-Job`) |
 | `HEAD`/`PUT /v1/files/<sha256>` | Referenzbild (oder LoRA außerhalb der Bibliothek) einmal hochladen, danach per Hash nennen |
 | `GET /v1/loras`, `PUT`/`PATCH`/`DELETE /v1/loras/<name>`, `POST /v1/loras/fetch` | die LoRA-Bibliothek; `PUT` nimmt die Datei als Inhalt, `label`, `model`, `trigger`, `strength` als Query |
+| `GET /v1/busy` | was gerade malt: `busy`, `app`, `model`, `memoryGb`, `since`, `waiting`; billig, Tonwerk fragt es, bevor es den Speicher belegt |
 | `GET /status` | oi-o-mat (Speicher, Platz, Token), was malt, was wartet, die letzten Bilder, Downloads |
 
 ```sh
