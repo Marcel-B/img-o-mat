@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>img-o-mat</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --card: #ffffff; --text: #1d1d1f; --muted: #6b6b70; --line: #e2e0db;
+    --accent: #0f8a6c; --accent-text: #ffffff; --warn: #b4521b; --danger: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141416; --card: #1e1e21; --text: #ececf0; --muted: #9a9aa2; --line: #303035;
+      --accent: #2fbf98; --accent-text: #0b1f19; --warn: #e39158; --danger: #f2756b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 72rem; margin: 0 auto; padding: 16px; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 17px; margin: 0 0 10px; }
+  .muted { color: var(--muted); }
+  .danger { color: var(--danger); }
+  .warn { color: var(--warn); }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  input, select, textarea { font: inherit; font-size: 16px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; width: 100%; }
+  textarea { min-height: 90px; resize: vertical; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .tags span { display: inline-block; font-size: 12px; border: 1px solid var(--line); border-radius: 99px; padding: 0 8px; margin: 2px 4px 2px 0; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { text-align: left; padding: 8px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 13px; color: var(--muted); font-weight: 600; border-top: 0; }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+  .bar > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+  .pictures { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); margin-top: 12px; }
+  .pictures figure { margin: 0; }
+  .pictures img { width: 100%; border-radius: 8px; display: block; background: var(--line); }
+  .pictures figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; word-break: break-word; }
+  .loras label.check { display: inline-flex; gap: 6px; align-items: center; color: var(--text); font-size: 14px; margin-right: 12px; }
+  .loras label.check input { width: auto; }
+  @media (max-width: 640px) {
+    .models td:nth-child(3), .models th:nth-child(3) { display: none; }
+    .lorastable td:nth-child(4), .lorastable th:nth-child(4) { display: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>img-o-mat</h1>
+    <span class="muted" id="worker">…</span>
+  </header>
+
+  <section>
+    <h2>Malen</h2>
+    <div class="grid">
+      <div><label for="model">Modell</label><select id="model"></select></div>
+      <div><label for="size">Größe</label>
+        <select id="size">
+          <option>1024x1024</option><option>1344x768</option><option>768x1344</option><option>1920x1088</option><option>1088x1920</option><option>512x512</option>
+        </select></div>
+      <div><label for="n">Anzahl</label><select id="n"><option>1</option><option>2</option><option>3</option><option>4</option></select></div>
+      <div><label for="seed">Seed (leer: zufällig)</label><input id="seed" inputmode="numeric"></div>
+    </div>
+    <div style="margin-top:10px"><label for="prompt">Prompt (Englisch malt am besten)</label><textarea id="prompt" maxlength="2000"></textarea></div>
+    <div class="loras" id="loraPicks" style="margin-top:8px"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="paint">Malen</button>
+      <button id="cancel" hidden>Abbrechen</button>
+      <span id="paintState" class="muted"></span>
+    </div>
+    <div class="bar" id="paintBar" hidden><div></div></div>
+    <div class="pictures" id="pictures"></div>
+  </section>
+
+  <section>
+    <h2>Warteschlange</h2>
+    <div id="queue" class="muted">…</div>
+  </section>
+
+  <section>
+    <div class="row" style="justify-content:space-between"><h2>Modelle</h2><button id="refresh">Neu prüfen</button></div>
+    <table class="models"><thead><tr><th>Modell</th><th>Lizenz</th><th>Speicher</th><th>Stand</th></tr></thead><tbody id="models"></tbody></table>
+  </section>
+
+  <section>
+    <h2>LoRAs</h2>
+    <table class="lorastable"><thead><tr><th>Name</th><th>Modell</th><th>Trigger</th><th>Stärke</th><th></th></tr></thead><tbody id="loras"></tbody></table>
+    <div class="row" style="margin-top:12px">
+      <input type="file" id="loraFile" accept=".safetensors" style="max-width:20rem">
+      <input id="loraName" placeholder="Name" style="max-width:14rem">
+      <button id="loraUpload">Hochladen</button>
+      <span id="loraState" class="muted"></span>
+    </div>
+    <div id="suggestions" style="margin-top:12px"></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let models = [], loras = [], current = null;
+
+async function api(path, options = {}) {
+  const response = await fetch(path, options);
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : {};
+  if (!response.ok) throw new Error(body.error?.message || `HTTP ${response.status}`);
+  return body;
+}
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function modelState(m) {
+  if (m.download?.state === 'running' || m.download?.state === 'waiting') {
+    const share = m.download.fraction != null ? ` ${Math.round(m.download.fraction * 100)} %` : '';
+    return `<span>lädt herunter${share} (${m.download.gb ?? 0} GB)</span>`;
+  }
+  if (!m.available) return `<span class="warn">${esc(m.unavailable)}</span>`;
+  const failed = m.download?.state === 'failed' ? `<div class="danger">${esc(m.download.error)}</div>` : '';
+  if (m.downloaded) return `<span>bereit</span>${failed}`;
+  const token = m.gated && m.tokenFound === false ? '<div class="warn">braucht einen Hugging-Face-Token</div>' : '';
+  return `<button data-download="${esc(m.id)}">Herunterladen (${m.downloadGb} GB)</button>${token}${failed}`;
+}
+
+function renderModels() {
+  $('models').innerHTML = models.map(m => `<tr>
+    <td><b>${esc(m.label)}</b><div class="tags">${m.lettering ? '<span>Schrift</span>' : ''}${m.loras ? '<span>LoRAs</span>' : ''}${m.references ? `<span>${m.references} Referenzen</span>` : ''}${m.startImage ? '<span>Startbild</span>' : ''}${m.contentFilter ? '<span>Inhaltsfilter</span>' : ''}${m.minSystemGb ? `<span>ab ${m.minSystemGb} GB</span>` : ''}</div></td>
+    <td>${esc(m.license)}<div class="muted">${m.commercial ? 'kommerziell nutzbar' : 'nur privat'}${m.gated ? ', gesperrt' : ''}</div></td>
+    <td>${m.memoryGb} GB</td>
+    <td>${modelState(m)}</td></tr>`).join('');
+  const chosen = $('model').value;
+  $('model').innerHTML = models.map(m => `<option value="${esc(m.id)}" ${m.available ? '' : 'disabled'}>${esc(m.label)}${m.available ? (m.downloaded ? '' : ' (lädt beim ersten Bild)') : ' (nicht verfügbar)'}</option>`).join('');
+  if (chosen && models.some(m => m.id === chosen)) $('model').value = chosen;
+  else {
+    const first = models.find(m => m.available);
+    if (first) $('model').value = first.id;
+  }
+  renderPicks();
+}
+
+function renderPicks() {
+  const model = models.find(m => m.id === $('model').value);
+  const fitting = model?.loras ? loras.filter(l => l.model === model.id) : [];
+  $('loraPicks').innerHTML = fitting.length
+    ? '<label>LoRAs (bis zu 3)</label>' + fitting.map(l => `<label class="check"><input type="checkbox" value="${esc(l.name)}">${esc(l.label)}</label>`).join('')
+    : '';
+}
+
+function renderLoras(list) {
+  loras = list.loras;
+  const options = id => '<option value="">unbekannt</option>' + models.filter(m => m.loras).map(m => `<option value="${esc(m.id)}" ${m.id === id ? 'selected' : ''}>${esc(m.label)}</option>`).join('');
+  $('loras').innerHTML = loras.map(l => `<tr data-lora="${esc(l.name)}">
+    <td><input value="${esc(l.label)}" data-field="label"><div class="muted">${esc(l.name)} · ${(l.sizeBytes / 1e6).toFixed(0)} MB${l.source ? ' · ' + esc(l.source) : ''}</div></td>
+    <td><select data-field="model">${options(l.model)}</select></td>
+    <td><input value="${esc(l.trigger ?? '')}" data-field="trigger" placeholder="kein Trigger"></td>
+    <td><input value="${l.strength}" data-field="strength" inputmode="decimal" style="max-width:5rem"></td>
+    <td><button data-delete="${esc(l.name)}">Löschen</button></td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted">Noch keine LoRAs.</td></tr>';
+  $('suggestions').innerHTML = list.suggestions.length
+    ? '<label>Krea-2-Stil-LoRAs von Hugging Face</label><div class="row">' + list.suggestions.map(s =>
+        `<button data-fetch="${esc(s.name)}" ${list.fetching.includes(s.name) ? 'disabled' : ''}>${esc(s.label)}${list.fetching.includes(s.name) ? ' …' : ''}</button>`).join('') + '</div>'
+    : '';
+  renderPicks();
+}
+
+function renderStatus(status) {
+  const probe = status.worker.probe;
+  $('worker').innerHTML = probe
+    ? `malt auf ${esc(probe.host || status.worker.name)} · ${probe.memoryGb ? Math.round(probe.memoryGb) + ' GB' : ''}${probe.freeGb != null ? ' · ' + probe.freeGb + ' GB frei für Modelle' : ''}`
+    : `<span class="danger">${esc(status.worker.error || 'der Mac, der malt, antwortet nicht')}</span>`;
+  const p = status.painter;
+  const line = job => `${esc(job.app)} · ${esc(job.model)} · ${esc(job.stage)}${job.stage !== 'queued' ? ' ' + Math.round(job.fraction * 100) + ' %' : ''}`;
+  const parts = [];
+  if (p.running) parts.push(`<div>Jetzt: ${line(p.running)}</div>`);
+  p.queue.forEach((job, i) => parts.push(`<div>${i + 1}. ${line(job)}</div>`));
+  if (!parts.length) parts.push('<div>Nichts zu tun.</div>');
+  if (p.recent.length) parts.push('<div style="margin-top:6px">Zuletzt: ' + p.recent.slice(0, 5).map(r => `${esc(r.app)} ${esc(r.model)} ${r.error ? '<span class="danger">' + esc(r.error) + '</span>' : '✓'}`).join(' · ') + '</div>');
+  $('queue').innerHTML = parts.join('');
+}
+
+async function load(fresh = false) {
+  try {
+    const [m, l] = await Promise.all([api('/v1/models' + (fresh ? '?fresh=1' : '')), api('/v1/loras')]);
+    models = m.data;
+    renderModels();
+    renderLoras(l);
+  } catch (error) {
+    $('worker').innerHTML = `<span class="danger">${esc(error.message)}</span>`;
+  }
+}
+
+async function poll() {
+  try {
+    renderStatus(await api('/status'));
+    if (models.some(m => ['running', 'waiting'].includes(m.download?.state))) {
+      models = (await api('/v1/models')).data;
+      renderModels();
+    }
+  } catch { /* the next round tries again */ }
+}
+
+async function paint() {
+  const loraNames = [...document.querySelectorAll('#loraPicks input:checked')].map(i => i.value);
+  if (loraNames.length > 3) { $('paintState').textContent = 'Höchstens drei LoRAs.'; return; }
+  const body = {
+    model: $('model').value, prompt: $('prompt').value, size: $('size').value, n: Number($('n').value),
+    stream: true, creator: 'img-o-mat', loras: loraNames.map(name => ({ name })),
+  };
+  if ($('seed').value.trim()) body.seed = Number($('seed').value);
+  try { localStorage.setItem('img-o-mat.form', JSON.stringify({ model: body.model, prompt: body.prompt, size: body.size, n: body.n })); } catch {}
+  $('paint').disabled = true; $('cancel').hidden = false; $('paintBar').hidden = false;
+  $('paintBar').firstElementChild.style.width = '0';
+  $('paintState').textContent = 'wird angefragt …';
+  try {
+    const response = await fetch('/v1/images/generations', { method: 'POST', headers: { 'content-type': 'application/json', 'x-llm-app': 'img-o-mat' }, body: JSON.stringify(body) });
+    if (!response.ok) throw new Error((await response.json()).error?.message || `HTTP ${response.status}`);
+    current = response.headers.get('x-img-job');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let cut;
+      while ((cut = buffer.indexOf('\n\n')) >= 0) {
+        const chunk = buffer.slice(0, cut); buffer = buffer.slice(cut + 2);
+        const name = /^event: (.*)$/m.exec(chunk)?.[1];
+        const data = /^data: (.*)$/m.exec(chunk)?.[1];
+        if (name && data) handle(name, JSON.parse(data), body);
+      }
+    }
+  } catch (error) {
+    $('paintState').innerHTML = `<span class="danger">${esc(error.message)}</span>`;
+  } finally {
+    $('paint').disabled = false; $('cancel').hidden = true; current = null;
+  }
+}
+
+const stages = { queued: 'wartet', sending: 'überträgt Dateien', loading: 'lädt das Modell', painting: 'malt', checking: 'prüft den Inhalt' };
+
+function handle(name, data, body) {
+  if (name === 'queued') $('paintState').textContent = `wartet, Platz ${data.place}${data.running ? ', gerade malt ' + data.running : ''}`;
+  if (name === 'progress') {
+    $('paintState').textContent = `${stages[data.stage] || data.stage} ${Math.round(data.fraction * 100)} %`;
+    $('paintBar').firstElementChild.style.width = `${Math.round(data.fraction * 100)}%`;
+  }
+  if (name === 'image') {
+    const url = `data:image/jpeg;base64,${data.b64_json}`;
+    const figure = document.createElement('figure');
+    figure.innerHTML = `<a href="${url}" download="img-o-mat-${body.model}-${data.seed}.jpg"><img src="${url}" alt=""></a>
+      <figcaption>${esc(body.model)} · Seed ${data.seed} · ${data.paintSeconds ?? '?'} s${data.revised_prompt ? '<br>' + esc(data.revised_prompt) : ''}</figcaption>`;
+    $('pictures').prepend(figure);
+  }
+  if (name === 'done') { $('paintState').textContent = 'fertig'; $('paintBar').hidden = true; }
+  if (name === 'error') { $('paintState').innerHTML = `<span class="danger">${esc(data.error.message)}</span>`; $('paintBar').hidden = true; }
+}
+
+document.addEventListener('click', async event => {
+  const target = event.target.closest('button');
+  if (!target) return;
+  try {
+    if (target.dataset.download) {
+      target.disabled = true;
+      await api(`/v1/models/${target.dataset.download}/download`, { method: 'POST' });
+      await load(true);
+    } else if (target.dataset.delete) {
+      if (!confirm(`LoRA ${target.dataset.delete} löschen?`)) return;
+      await api(`/v1/loras/${encodeURIComponent(target.dataset.delete)}`, { method: 'DELETE' });
+      renderLoras(await api('/v1/loras'));
+    } else if (target.dataset.fetch) {
+      target.disabled = true; target.textContent += ' …';
+      await api('/v1/loras/fetch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: target.dataset.fetch }) });
+      renderLoras(await api('/v1/loras'));
+    }
+  } catch (error) {
+    alert(error.message);
+    load();
+  }
+});
+
+document.addEventListener('change', async event => {
+  const row = event.target.closest('tr[data-lora]');
+  if (!row) return;
+  const field = event.target.dataset.field;
+  const value = field === 'strength' ? Number(event.target.value.replace(',', '.')) : event.target.value;
+  try {
+    await api(`/v1/loras/${encodeURIComponent(row.dataset.lora)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ [field]: value }) });
+    renderLoras(await api('/v1/loras'));
+  } catch (error) { alert(error.message); }
+});
+
+$('model').addEventListener('change', renderPicks);
+$('paint').addEventListener('click', paint);
+$('cancel').addEventListener('click', () => current && api(`/v1/jobs/${current}`, { method: 'DELETE' }).catch(() => {}));
+$('refresh').addEventListener('click', () => load(true));
+$('loraFile').addEventListener('change', () => {
+  const file = $('loraFile').files[0];
+  if (file && !$('loraName').value) $('loraName').value = file.name.replace(/\.safetensors$/i, '').replace(/[^A-Za-z0-9 ._-]/g, '-');
+});
+$('loraUpload').addEventListener('click', async () => {
+  const file = $('loraFile').files[0];
+  const name = $('loraName').value.trim();
+  if (!file || !name) { $('loraState').textContent = 'Datei und Name wählen.'; return; }
+  $('loraState').textContent = 'lädt hoch …';
+  try {
+    await api(`/v1/loras/${encodeURIComponent(name)}`, { method: 'PUT', body: file });
+    $('loraState').textContent = 'gespeichert';
+    $('loraFile').value = ''; $('loraName').value = '';
+    renderLoras(await api('/v1/loras'));
+  } catch (error) { $('loraState').innerHTML = `<span class="danger">${esc(error.message)}</span>`; }
+});
+
+try {
+  const saved = JSON.parse(localStorage.getItem('img-o-mat.form') || '{}');
+  if (saved.prompt) $('prompt').value = saved.prompt;
+  if (saved.size) $('size').value = saved.size;
+  if (saved.n) $('n').value = saved.n;
+  load().then(() => { if (saved.model && models.some(m => m.id === saved.model && m.available)) { $('model').value = saved.model; renderPicks(); } });
+} catch { load(); }
+poll();
+setInterval(poll, 3000);
+</script>
+</body>
+</html>
