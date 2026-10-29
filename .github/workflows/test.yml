@@ -1,0 +1,26 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 3.9 is macOS's own python3, which runs the worker's launcher and probe on oi-o-mat.
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Tests
+        run: python -m unittest discover -v tests
+      - name: Shell scripts
+        run: |
+          sh -n install-worker.sh
+          sh -n deploy/to-proxmox.sh
+          bash -n deploy/proxmox-lxc.sh

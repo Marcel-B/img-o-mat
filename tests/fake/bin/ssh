@@ -1,0 +1,5 @@
+#!/bin/sh
+# Stands in for ssh in the tests: what sshd does with the service's key, which may only run launch.py --ssh.
+# The last argument is the remote command; the worker's root comes from IMG_O_MAT_WORKER_ROOT.
+for last; do :; done
+SSH_ORIGINAL_COMMAND="$last" exec python3 "$(dirname "$0")/../../../worker/launch.py" --ssh
