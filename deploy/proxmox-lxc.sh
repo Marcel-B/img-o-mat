@@ -10,6 +10,7 @@
 #   CTID         container id (the next free one)
 #   STORAGE      storage for the root disk (local-lvm), TEMPLATE_STORAGE for the Debian template (local)
 #   BRIDGE       network bridge (vmbr0), MEMORY in MB (512), CORES (1), DISK in GB (16; LoRAs and uploads)
+#   LOKI_URL     Loki of the monitoring stack (http://monitoring:3100); written into config.json, with host proxmox
 #
 # Running it again finds the container by its name, copies the service anew and restarts it; config, key and LoRAs
 # stay. The last line it prints is the service's public key.
@@ -24,10 +25,11 @@ CORES="${CORES:-1}"
 DISK="${DISK:-16}"
 TS_AUTHKEY="${TS_AUTHKEY:-}"
 WORKER="${WORKER:-marcel@oi-o-mat}"
+LOKI_URL="${LOKI_URL:-}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 
 case "${1:-}" in
-  -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   "") ;;
   *) echo "Unbekannt: $1" >&2; exit 2 ;;
 esac
@@ -97,6 +99,9 @@ in_ct "set -e
   mkdir -p /etc/img-o-mat
   if [ ! -f /etc/img-o-mat/config.json ]; then
     python3 -c 'import json, sys; json.dump({\"root\": \"/var/lib/img-o-mat\", \"tokenFile\": \"/var/lib/img-o-mat/huggingface.token\", \"worker\": {\"ssh\": sys.argv[1]}}, open(\"/etc/img-o-mat/config.json\", \"w\"), indent=2)' '$WORKER'
+  fi
+  if [ -n '$LOKI_URL' ]; then
+    python3 -c 'import json, sys; p = \"/etc/img-o-mat/config.json\"; c = json.load(open(p)); c[\"loki\"] = {\"url\": sys.argv[1], \"host\": \"proxmox\"}; json.dump(c, open(p, \"w\"), indent=2)' '$LOKI_URL'
   fi
   if [ ! -f /var/lib/img-o-mat/.ssh/id_ed25519 ]; then
     install -d -o imgomat -g imgomat -m 700 /var/lib/img-o-mat/.ssh

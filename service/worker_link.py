@@ -31,15 +31,17 @@ class WorkerError(Exception):
 
 
 class WorkerLink:
-    def __init__(self, config, log):
+    def __init__(self, config, log, metrics=None):
         self.config = config
         self.log = log
+        self.metrics = metrics
         worker = config.get("worker") or {}
         self.ssh = worker.get("ssh")
         self.key = worker.get("key")
         self._probe: dict | None = None
         self._probed_at = 0.0
         self._probe_error: str | None = None
+        self._ever_probed = False
         self._lock = threading.Lock()
         # Hashes the worker is known to have and since when, so a picture does not ask before every LoRA. The worker
         # forgets files unused for a month (probe.py), so what is known here is asked again after a day.
@@ -108,15 +110,25 @@ class WorkerLink:
             probe = None
             message = failure.message if isinstance(failure, WorkerError) else str(failure)
             error = f"{self.name} antwortet nicht: {message}"
+        if probe is None and self.metrics:
+            self.metrics.worker_errors.inc(kind="ssh" if self.ssh else "runner")
         with self._lock:
             if probe is None and error != self._probe_error:
-                self.log(error)
+                self.log(error, "warning")
+            elif probe is not None and self._probe_error is not None:
+                self.log(f"{self.name} antwortet wieder.")
             self._probe, self._probed_at, self._probe_error = probe, time.time(), error
+            self._ever_probed = True
             return probe
 
     @property
     def probe_error(self) -> str | None:
         return self._probe_error
+
+    @property
+    def probed(self) -> bool:
+        """Whether the worker was asked at all since the start."""
+        return self._ever_probed
 
     def forget_probe(self) -> None:
         with self._lock:

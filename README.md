@@ -75,11 +75,28 @@ curl http://img-o-mat:1236/v1/images/generations -H 'content-type: application/j
 
 Der Dienst hat keine Anmeldung, wie Tonwerk und die Schranke. Er gehört ins Heimnetz und Tailscale. Apps sollen über die Schranke kommen, damit Freigabe und Rücksicht auf Tonwerk gelten.
 
+## Überwachung
+
+`GET /metrics` liefert Zahlen für Prometheus, ohne Anmeldung und ohne Inhalte. Das sind:
+- Bilder je App, Modell und Ergebnis (`done`, `failed`, `filtered`, `cancelled`)
+- Mal- und Wartezeit
+- die Warteschlange und welches Modell gerade malt
+- Fehler auf dem Weg zu oi-o-mat (`ssh`, `runner`, `transfer`) und ob oi-o-mat zuletzt antwortete (geprüft alle 2 Minuten)
+- Downloads, belegter Platz für Referenzbilder und LoRAs, Anfragen je Route und Speicher und CPU des Dienstes
+
+Als App zählen nur `tonwerk-ai`, `3d-o-mat` und `img-o-mat` (die Seite). Alle anderen erscheinen als `other`, damit ein fremder Schlüssel keine neuen Reihen anlegt. Die Liste lässt sich in `config.json` unter `"metrics": {"apps": [...]}` ändern.
+
+Die Logzeilen gehen zusätzlich an Loki, wenn in `config.json` `"loki": {"url": "http://monitoring:3100", "host": "proxmox"}` steht. Die Labels sind `app=img-o-mat`, `host`, `level` und `source` (`painter`, `worker`, `downloads`, `loras`, `files`, `http`, `config`). `deploy/to-proxmox.sh` trägt das mit `LOKI_URL=http://monitoring:3100` ein. Ist Loki weg, werden die Zeilen verworfen und gezählt. Das Journal bleibt, wie es ist. Prompts stehen in keiner Zeile, weder dort noch in Loki.
+
+Das Dashboard und das Ziel liegen im Monitoring-Stack (Tonwerk-AI, `deploy/monitoring/`).
+
 ## Entwickeln
 
 Python 3.9 oder neuer, ohne Pakete. `python3 -m unittest discover tests` spielt den ganzen Weg gegen nachgestellte Maler (`tests/fake`) durch, lokal und über einen nachgestellten `ssh`, der wie der erzwungene Befehl arbeitet. Die echten Maler (`worker/paint.py`, `fetch.py`) brauchen einen Mac mit Apple Silicon.
 
 ## Was getestet ist
+
+Stand 2026-10-30: `/metrics` und der Versand an Loki laufen gegen die nachgestellten Maler und einen kleinen nachgestellten Loki. Die Ausgabe besteht `promtool check metrics`, und die Tests laufen mit Python 3.9 und 3.13. Im Proxmox-Container ist das noch nicht gelaufen.
 
 Stand 2026-10-28: Die Tests laufen in einem Linux-Container. Einmal lief es dort auch über einen echten `sshd` mit dem erzwungenen Befehl, mit LoRA-Übertragung, Abbruch (der entfernte Prozess endet) und Download, alles mit den nachgestellten Malern. `worker/paint.py` ist Tonwerks bewährtes Malskript mit kleinen Änderungen (Bild über stdout, Dateien per Hash). Auf oi-o-mat, in Proxmox und mit echten Modellen ist es noch nicht gelaufen. Ob MLX in einer SSH-Sitzung auf oi-o-mat die GPU bekommt, zeigt erst das erste Bild.
 
