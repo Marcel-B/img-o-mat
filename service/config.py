@@ -3,7 +3,9 @@
     {"listen": "0.0.0.0", "port": 1236, "worker": {"ssh": "marcel@oi-o-mat", "key": null},
      "root": "~/Library/Application Support/img-o-mat",
      "tokenFile": "~/.config/img-o-mat/huggingface.token", "systemMemoryGb": null, "minFreeGb": 20,
-     "timeoutMinutes": 90, "keepFilesDays": 7, "models": [...]}
+     "timeoutMinutes": 90, "keepFilesDays": 7, "models": [...],
+     "metrics": {"apps": ["tonwerk-ai", "3d-o-mat", "img-o-mat"]},
+     "loki": {"url": "http://monitoring:3100", "host": "proxmox"}}
 
 Where the Python environments and the models lie is the worker's business (worker/common.py, worker.json on
 oi-o-mat). The token here is only for fetching LoRAs from Hugging Face; the one on oi-o-mat downloads the models.

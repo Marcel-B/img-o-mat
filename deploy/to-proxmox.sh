@@ -7,7 +7,7 @@
 #   deploy/to-proxmox.sh            set up or update
 #
 # Settings through the environment: PROXMOX (ssh name of the Proxmox host, "proxmox"), WORKER (how the container
-# reaches this Mac, $USER@<this Mac's name>), plus those of proxmox-lxc.sh (TS_AUTHKEY, CTID, ...).
+# reaches this Mac, $USER@<this Mac's name>), plus those of proxmox-lxc.sh (TS_AUTHKEY, CTID, LOKI_URL, ...).
 # install-worker.sh must have run here once (the environments take a while; it is not repeated here).
 set -eu
 
@@ -22,7 +22,7 @@ TOKEN="$HOME/.config/tonwerk/huggingface.token"
 
 echo "Kopiere das Repository nach $PROXMOX:/root/img-o-mat ..."
 tar -C "$HERE" -czf - service worker deploy | ssh "$PROXMOX" 'rm -rf /root/img-o-mat && mkdir -p /root/img-o-mat && tar -C /root/img-o-mat -xzf -'
-OUT="$(ssh "$PROXMOX" "WORKER='$WORKER' TS_AUTHKEY='${TS_AUTHKEY:-}' CTID='${CTID:-}' /root/img-o-mat/deploy/proxmox-lxc.sh" | tr -d '\r')"
+OUT="$(ssh "$PROXMOX" "WORKER='$WORKER' TS_AUTHKEY='${TS_AUTHKEY:-}' CTID='${CTID:-}' LOKI_URL='${LOKI_URL:-}' /root/img-o-mat/deploy/proxmox-lxc.sh" | tr -d '\r')"
 CTID="$(printf '%s\n' "$OUT" | sed -n 's/^CTID=//p' | tail -n 1)"
 KEY="$(printf '%s\n' "$OUT" | grep '^ssh-ed25519 ' | tail -n 1)"
 [ -n "$CTID" ] && [ -n "$KEY" ] || { echo "proxmox-lxc.sh lieferte keinen Schlüssel:" >&2; printf '%s\n' "$OUT" >&2; exit 1; }

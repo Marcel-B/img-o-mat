@@ -78,10 +78,11 @@ class Job:
 
 
 class Painter:
-    def __init__(self, config, link, log):
+    def __init__(self, config, link, log, metrics=None):
         self.config = config
         self.link = link
         self.log = log
+        self.metrics = metrics
         self.queue: list[Job] = []
         self.running: Job | None = None
         self.finished = deque(maxlen=20)
@@ -129,16 +130,19 @@ class Painter:
                 self.running = job
                 self._announce_places()
             job.started = time.time()
+            if self.metrics:
+                self.metrics.wait.observe(job.started - job.created, client=self.metrics.app(job.app))
             try:
                 self._paint(job)
                 self._finish(job, None)
             except Cancelled:
                 self._finish(job, (499, "abgebrochen"))
             except PaintError as error:
-                self.log(f"{job.app}: {job.model['id']} fehlgeschlagen: {error.message}")
+                # A picture the filter held back is the request's, not the service's: no warning.
+                self.log(f"{job.app}: {job.model['id']} fehlgeschlagen: {error.message}", "info" if error.status == 422 else "warning")
                 self._finish(job, (error.status, error.message))
             except Exception as error:  # the queue must keep going whatever one picture does
-                self.log(f"{job.app}: {job.model['id']} fehlgeschlagen: {error!r}")
+                self.log(f"{job.app}: {job.model['id']} fehlgeschlagen: {error!r}", "error")
                 self._finish(job, (500, str(error)))
             finally:
                 with self._wake:
@@ -147,6 +151,14 @@ class Painter:
     def _finish(self, job: Job, error: tuple[int, str] | None) -> None:
         job.error = error
         job.stage = "failed" if error else "done"
+        if self.metrics:
+            # Pictures, not jobs: the ones done count as done, a failed job adds the one that broke.
+            app = self.metrics.app(job.app)
+            if job.results:
+                self.metrics.images.inc(len(job.results), client=app, model=job.model["id"], result="done")
+            if error:
+                result = "cancelled" if error[0] == 499 else "filtered" if error[0] == 422 else "failed"
+                self.metrics.images.inc(client=app, model=job.model["id"], result=result)
         self.finished.appendleft({**job.summary(), "error": error[1] if error else None})
         self._ranks.pop(job.id, None)
         with job._changed:
@@ -169,6 +181,7 @@ class Painter:
             try:
                 self.link.send_file(digest, path)
             except Exception as error:
+                self._worker_error("transfer")
                 raise PaintError(502, str(error))
             if job.cancelled:
                 raise Cancelled()
@@ -230,11 +243,17 @@ class Painter:
         if process.returncode != 0 or done is None or not done.get("jpeg"):
             if process.returncode and process.returncode < 0 and time.time() - started >= self.config.timeout:
                 raise PaintError(504, f"Das Modell brauchte länger als {self.config.timeout / 60:.0f} Minuten.")
+            status = filter_status(tail)
             if process.returncode == 255 and self.link.ssh and not done:
                 # ssh's own exit code: the connection, not the picture, failed.
                 tail.append(f"Error: {self.link.name} nicht erreichbar über SSH.")
-            self.log("\n".join(tail))
-            raise PaintError(filter_status(tail), failure_message(tail))
+                self._worker_error("ssh")
+            elif status != 422:
+                self._worker_error("runner")
+            self.log("\n".join(tail), "info" if status == 422 else "warning")
+            raise PaintError(status, failure_message(tail))
+        if self.metrics:
+            self.metrics.paint.observe(time.time() - started, model=model["id"])
         return {
             "jpeg": base64.b64decode(done["jpeg"]),
             "seed": seed,
@@ -243,6 +262,10 @@ class Painter:
             "paintSeconds": done.get("paintSeconds"),
             "peakMemoryGb": done.get("peakMemoryGb"),
         }
+
+    def _worker_error(self, kind: str) -> None:
+        if self.metrics:
+            self.metrics.worker_errors.inc(kind=kind)
 
     @staticmethod
     def _stop(process: subprocess.Popen) -> None:

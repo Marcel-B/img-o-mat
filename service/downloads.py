@@ -13,9 +13,10 @@ PREFIX = "IMGOMAT "
 
 
 class Downloads:
-    def __init__(self, link, log):
+    def __init__(self, link, log, metrics=None):
         self.link = link
         self.log = log
+        self.metrics = metrics
         self.states: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._line = threading.Semaphore(1)
@@ -34,6 +35,10 @@ class Downloads:
                                          "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
         threading.Thread(target=self._run, args=(model,), daemon=True, name=f"download {model['id']}").start()
         return self.state(model["id"])
+
+    def _count(self, model: dict, result: str) -> None:
+        if self.metrics:
+            self.metrics.downloads.inc(model=model["id"], result=result)
 
     def _set(self, model_id: str, **values) -> None:
         with self._lock:
@@ -61,11 +66,15 @@ class Downloads:
                 if process.returncode != 0:
                     error = next((l for l in reversed(tail) if l.startswith("Error")), tail[-1] if tail else "Download fehlgeschlagen")
                     self._set(model["id"], state="failed", error=error.removeprefix("Error: "))
-                    self.log(f"Download von {model['id']} fehlgeschlagen: {error}")
+                    self.log(f"Download von {model['id']} fehlgeschlagen: {error}", "warning")
+                    self._count(model, "failed")
                 else:
                     self._set(model["id"], state="done", fraction=1)
                     self.log(f"{model['id']} ist heruntergeladen.")
+                    self._count(model, "done")
             except Exception as error:  # the thread must leave a state behind
                 self._set(model["id"], state="failed", error=str(error))
+                self.log(f"Download von {model['id']} fehlgeschlagen: {error!r}", "warning")
+                self._count(model, "failed")
             finally:
                 self.link.forget_probe()

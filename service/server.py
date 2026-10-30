@@ -15,6 +15,7 @@ The API, OpenAI's images API where it has one (README, "Schnittstelle"):
     HEAD   /v1/files/<sha256>, PUT ...      reference pictures (and LoRAs not in the library), once per file
     GET    /v1/loras, PUT/PATCH/DELETE /v1/loras/<name>, POST /v1/loras/fetch
     GET    /status                          what runs and waits, the worker, the downloads
+    GET    /metrics                         numbers for Prometheus (metrics.py), no login, nothing but numbers
     GET    /                                the page
 Plain Python 3.9, nothing to install: macOS's own python3 runs it.
 """
@@ -40,7 +41,9 @@ import config as settings  # noqa: E402
 from catalogue import Catalogue, max_references, takes_loras, takes_start_image  # noqa: E402
 from downloads import Downloads  # noqa: E402
 from files import FileError, Files  # noqa: E402
+from loki import LokiShipper  # noqa: E402
 from loras import MAX_PER_PICTURE, MAX_STRENGTH, SUGGESTIONS, LoraError, Loras  # noqa: E402
+from metrics import Metrics, folder_bytes, gauge  # noqa: E402
 from painter import Job, Painter  # noqa: E402
 from worker_link import WorkerLink  # noqa: E402
 
@@ -51,24 +54,89 @@ UI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui.html")
 # Tonwerk-AI waits for a cover it asked for; other apps through the gate come after it.
 DEFAULT_PRIORITY = 50
 PING_SECONDS = 15
+# The names that become the app label of the metrics (config "metrics": {"apps": [...]}): Tonwerk-AI asks directly,
+# the gate passes on the app behind it (3d-o-mat), the page calls itself img-o-mat. Everything else is "other".
+DEFAULT_METRIC_APPS = ("tonwerk-ai", "3d-o-mat", "img-o-mat")
+# How often the worker is asked whether it answers, for imgomat_worker_reachable when nobody looks at the page.
+PROBE_INTERVAL = 120
+# Route patterns for the request counter: the path itself would make a series per file and LoRA.
+ROUTES = (
+    ("/v1/models/<id>/download", re.compile(r"/v1/models/[^/]+/download")),
+    ("/v1/files/<sha256>", re.compile(r"/v1/files/[^/]+")),
+    ("/v1/loras/fetch", re.compile(r"/v1/loras/fetch")),
+    ("/v1/loras/<name>", re.compile(r"/v1/loras/[^/]+")),
+    ("/v1/jobs/<id>", re.compile(r"/v1/jobs/[^/]+")),
+)
+KNOWN_ROUTES = {"/", "/v1/models", "/v1/images/generations", "/v1/busy", "/v1/loras", "/status", "/metrics"}
+
+shipper: LokiShipper | None = None
 
 
-def log(message: str) -> None:
+def log(message: str, level: str = "info", source: str = "http") -> None:
+    """One line to stdout (the journal) and, when configured, to Loki. Never a prompt: they can be personal."""
     print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}", flush=True)
+    if shipper is not None:
+        shipper.add(message, level, source)
+
+
+def logger(source: str):
+    return lambda message, level="info": log(message, level, source)
+
+
+def route_of(path: str) -> str:
+    if path in KNOWN_ROUTES:
+        return path
+    for name, pattern in ROUTES:
+        if pattern.fullmatch(path):
+            return name
+    return "other"
 
 
 class Service:
     def __init__(self, config):
+        global shipper
         self.config = config
         os.makedirs(config.root, exist_ok=True)
+        self.metrics = Metrics((config.get("metrics") or {}).get("apps") or DEFAULT_METRIC_APPS)
+        shipper = LokiShipper(config.get("loki"), self.metrics.loki_sent, self.metrics.loki_dropped)
         self.catalogue = Catalogue(config)
-        self.link = WorkerLink(config, log)
-        self.files = Files(config, log)
-        self.loras = Loras(config, self.catalogue, log)
-        self.downloads = Downloads(self.link, log)
-        self.painter = Painter(config, self.link, log)
+        self.link = WorkerLink(config, logger("worker"), self.metrics)
+        self.files = Files(config, logger("files"))
+        self.loras = Loras(config, self.catalogue, logger("loras"))
+        self.downloads = Downloads(self.link, logger("downloads"), self.metrics)
+        self.painter = Painter(config, self.link, logger("painter"), self.metrics)
         self.jobs: dict[str, Job] = {}
         threading.Thread(target=self._housekeeping, daemon=True, name="housekeeping").start()
+        threading.Thread(target=self._watch_worker, daemon=True, name="worker watch").start()
+
+    def _watch_worker(self) -> None:
+        while True:
+            time.sleep(PROBE_INTERVAL)
+            try:
+                self.probe(fresh=True)
+            except Exception as error:  # the watch must go on
+                log(f"Prüfen von {self.link.name}: {error!r}", "warning", "worker")
+
+    def metrics_text(self) -> str:
+        def states(out: list) -> None:
+            painter = self.painter.status()
+            waiting = {app: 0 for app in sorted(self.metrics.apps)}
+            for job in painter["queue"]:
+                app = self.metrics.app(job["app"])
+                waiting[app] = waiting.get(app, 0) + 1
+            gauge(out, "imgomat_queue_waiting", "Jobs waiting in the queue, by app.",
+                  [({"client": app}, count) for app, count in waiting.items()])
+            running = painter["running"]["model"] if painter["running"] else None
+            gauge(out, "imgomat_painting", "1 for the model that paints now.",
+                  [({"model": m["id"]}, 1 if m["id"] == running else 0) for m in self.catalogue.models])
+            reachable = self.link.probed and self.link.probe_error is None
+            gauge(out, "imgomat_worker_reachable", f"Whether the Mac that paints answered its last probe (every {PROBE_INTERVAL} s).",
+                  [({}, 1 if reachable else 0)] if self.link.probed else [])
+            gauge(out, "imgomat_files_bytes", "Bytes in the service's folders: uploaded references and the LoRA library.",
+                  [({"kind": "uploads"}, folder_bytes(self.config.files)), ({"kind": "loras"}, folder_bytes(self.loras.folder))])
+            gauge(out, "imgomat_loki_enabled", "1 when log lines go to Loki.", [({}, 1 if shipper and shipper.enabled else 0)])
+
+        return self.metrics.render(states)
 
     def _housekeeping(self) -> None:
         while True:
@@ -232,6 +300,10 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):  # the access log would drown the service's own lines
         pass
 
+    def send_response(self, code, message=None):
+        self.status_sent = code
+        super().send_response(code, message)
+
     # --- plumbing ------------------------------------------------------------------------------------------------
 
     def send_json(self, status: int, value, headers: dict | None = None) -> None:
@@ -287,6 +359,7 @@ class Handler(BaseHTTPRequestHandler):
         return parsed.path.rstrip("/") or "/", dict(urllib.parse.parse_qsl(parsed.query))
 
     def handle_safely(self, work) -> None:
+        self.status_sent = 0
         try:
             work()
         except (RequestError, FileError, LoraError) as error:
@@ -294,11 +367,14 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
         except Exception as error:  # one request must not take the server down
-            log(f"{self.command} {self.path}: {error!r}")
+            log(f"{self.command} {route_of(self.route()[0])}: {error!r}", "error")
             try:
                 self.send_error_json(500, str(error))
             except OSError:
                 pass
+        finally:
+            # 0: the client left before an answer.
+            self.service.metrics.requests.inc(method=self.command, route=route_of(self.route()[0]), status=self.status_sent)
 
     # --- verbs -----------------------------------------------------------------------------------------------------
 
@@ -338,6 +414,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, service.status())
         elif path == "/v1/busy":
             self.send_json(200, service.busy())
+        elif path == "/metrics":
+            body = service.metrics_text().encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif path == "/v1/loras":
             self.send_json(200, service.loras.list())
         else:
@@ -498,7 +581,9 @@ def main() -> int:
     Handler.service = Service(config)
     server = ThreadingHTTPServer((config.listen, config.port), Handler)
     server.daemon_threads = True
-    log(f"img-o-mat hört auf {config.listen}:{config.port}, malt auf {Handler.service.link.name}, Daten in {config.root}.")
+    log(f"img-o-mat hört auf {config.listen}:{config.port}, malt auf {Handler.service.link.name}, Daten in {config.root}.", source="config")
+    log(f"Logs gehen an Loki ({shipper.url}, host {shipper.host})." if shipper and shipper.enabled
+        else "Logs gehen nicht an Loki (loki.url in der Konfiguration leer).", source="config")
     server.serve_forever()
     return 0
 
