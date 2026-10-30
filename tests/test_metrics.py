@@ -126,18 +126,18 @@ class MetricsTest(unittest.TestCase):
                      "process_start_time_seconds"):
             self.assertIn(f"# TYPE {name} ", text)
         self.assertEqual(value(text, "imgomat_painting", 'model="klein-4b"'), 0)
-        self.assertEqual(value(text, "imgomat_queue_waiting", 'app="tonwerk-ai"'), 0)
+        self.assertEqual(value(text, "imgomat_queue_waiting", 'client="tonwerk-ai"'), 0)
         self.assertGreater(value(text, "process_resident_memory_bytes"), 0)
 
     def test_a_picture_counts_with_its_app_and_model(self):
         before = self.metrics()
-        done = value(before, "imgomat_images_total", 'app="tonwerk-ai",model="klein-4b",result="done"') or 0
+        done = value(before, "imgomat_images_total", 'client="tonwerk-ai",model="klein-4b",result="done"') or 0
         status, _ = self.paint("tonwerk-ai", n=2)
         self.assertEqual(status, 200)
         text = self.metrics()
-        self.assertEqual(value(text, "imgomat_images_total", 'app="tonwerk-ai",model="klein-4b",result="done"'), done + 2)
+        self.assertEqual(value(text, "imgomat_images_total", 'client="tonwerk-ai",model="klein-4b",result="done"'), done + 2)
         self.assertGreaterEqual(value(text, "imgomat_paint_seconds_count", 'model="klein-4b"'), 2)
-        self.assertGreaterEqual(value(text, "imgomat_wait_seconds_count", 'app="tonwerk-ai"'), 1)
+        self.assertGreaterEqual(value(text, "imgomat_wait_seconds_count", 'client="tonwerk-ai"'), 1)
         self.assertEqual(value(text, 'imgomat_paint_seconds_bucket', 'model="klein-4b",le="+Inf"'),
                          value(text, "imgomat_paint_seconds_count", 'model="klein-4b"'))
 
@@ -145,7 +145,7 @@ class MetricsTest(unittest.TestCase):
         status, _ = self.paint("erfundene-app")
         self.assertEqual(status, 200)
         text = self.metrics()
-        self.assertGreaterEqual(value(text, "imgomat_images_total", 'app="other",model="klein-4b",result="done"'), 1)
+        self.assertGreaterEqual(value(text, "imgomat_images_total", 'client="other",model="klein-4b",result="done"'), 1)
         self.assertNotIn("erfundene-app", text)
 
     def test_a_filtered_picture_is_no_worker_error(self):
@@ -153,7 +153,7 @@ class MetricsTest(unittest.TestCase):
         status, _ = self.paint("3d-o-mat", model="klein-9b", prompt="filter me")
         self.assertEqual(status, 422)
         text = self.metrics()
-        self.assertEqual(value(text, "imgomat_images_total", 'app="3d-o-mat",model="klein-9b",result="filtered"'), 1)
+        self.assertEqual(value(text, "imgomat_images_total", 'client="3d-o-mat",model="klein-9b",result="filtered"'), 1)
         self.assertEqual(self.service.metrics.worker_errors.value(kind="runner"), before)
 
     def test_a_broken_picture_counts_as_failed_and_runner_error(self):
@@ -161,7 +161,7 @@ class MetricsTest(unittest.TestCase):
         status, _ = self.paint("img-o-mat", prompt="please fail")
         self.assertEqual(status, 500)
         text = self.metrics()
-        self.assertEqual(value(text, "imgomat_images_total", 'app="img-o-mat",model="klein-4b",result="failed"'), 1)
+        self.assertEqual(value(text, "imgomat_images_total", 'client="img-o-mat",model="klein-4b",result="failed"'), 1)
         self.assertEqual(self.service.metrics.worker_errors.value(kind="runner"), before + 1)
 
     def test_requests_count_by_route_pattern_not_path(self):

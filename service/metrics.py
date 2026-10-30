@@ -131,7 +131,7 @@ class Metrics:
     def __init__(self, apps):
         # Only these names become an app label; everything else is "other", so a key nobody knows cannot add series.
         self.apps = set(apps)
-        self.images = Counter("imgomat_images_total", "Pictures by app, model and result (done, failed, filtered, cancelled).")
+        self.images = Counter("imgomat_images_total", "Pictures by client app, model and result (done, failed, filtered, cancelled).")
         self.paint = Histogram("imgomat_paint_seconds", "Time one picture took, from starting the runner to its answer.", PAINT_BUCKETS)
         self.wait = Histogram("imgomat_wait_seconds", "Time a job waited in the queue before it started.", WAIT_BUCKETS)
         self.worker_errors = Counter("imgomat_worker_errors_total", "Failures reaching the Mac that paints, by kind (ssh, runner, transfer).")

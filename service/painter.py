@@ -131,7 +131,7 @@ class Painter:
                 self._announce_places()
             job.started = time.time()
             if self.metrics:
-                self.metrics.wait.observe(job.started - job.created, app=self.metrics.app(job.app))
+                self.metrics.wait.observe(job.started - job.created, client=self.metrics.app(job.app))
             try:
                 self._paint(job)
                 self._finish(job, None)
@@ -155,10 +155,10 @@ class Painter:
             # Pictures, not jobs: the ones done count as done, a failed job adds the one that broke.
             app = self.metrics.app(job.app)
             if job.results:
-                self.metrics.images.inc(len(job.results), app=app, model=job.model["id"], result="done")
+                self.metrics.images.inc(len(job.results), client=app, model=job.model["id"], result="done")
             if error:
                 result = "cancelled" if error[0] == 499 else "filtered" if error[0] == 422 else "failed"
-                self.metrics.images.inc(app=app, model=job.model["id"], result=result)
+                self.metrics.images.inc(client=app, model=job.model["id"], result=result)
         self.finished.appendleft({**job.summary(), "error": error[1] if error else None})
         self._ranks.pop(job.id, None)
         with job._changed:

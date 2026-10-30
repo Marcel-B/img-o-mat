@@ -125,7 +125,7 @@ class Service:
                 app = self.metrics.app(job["app"])
                 waiting[app] = waiting.get(app, 0) + 1
             gauge(out, "imgomat_queue_waiting", "Jobs waiting in the queue, by app.",
-                  [({"app": app}, count) for app, count in waiting.items()])
+                  [({"client": app}, count) for app, count in waiting.items()])
             running = painter["running"]["model"] if painter["running"] else None
             gauge(out, "imgomat_painting", "1 for the model that paints now.",
                   [({"model": m["id"]}, 1 if m["id"] == running else 0) for m in self.catalogue.models])

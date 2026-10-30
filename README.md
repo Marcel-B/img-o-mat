@@ -84,7 +84,7 @@ Der Dienst hat keine Anmeldung, wie Tonwerk und die Schranke. Er gehört ins Hei
 - Fehler auf dem Weg zu oi-o-mat (`ssh`, `runner`, `transfer`) und ob oi-o-mat zuletzt antwortete (geprüft alle 2 Minuten)
 - Downloads, belegter Platz für Referenzbilder und LoRAs, Anfragen je Route und Speicher und CPU des Dienstes
 
-Als App zählen nur `tonwerk-ai`, `3d-o-mat` und `img-o-mat` (die Seite). Alle anderen erscheinen als `other`, damit ein fremder Schlüssel keine neuen Reihen anlegt. Die Liste lässt sich in `config.json` unter `"metrics": {"apps": [...]}` ändern.
+Als App zählen nur `tonwerk-ai`, `3d-o-mat` und `img-o-mat` (die Seite). Alle anderen erscheinen als `other`, damit ein fremder Schlüssel keine neuen Reihen anlegt. Die Liste lässt sich in `config.json` unter `"metrics": {"apps": [...]}` ändern. Das Label heißt `client`, wie bei der LLM-Schranke, weil Prometheus das Ziel schon mit `app=img-o-mat` kennzeichnet.
 
 Die Logzeilen gehen zusätzlich an Loki, wenn in `config.json` `"loki": {"url": "http://monitoring:3100", "host": "proxmox"}` steht. Die Labels sind `app=img-o-mat`, `host`, `level` und `source` (`painter`, `worker`, `downloads`, `loras`, `files`, `http`, `config`). `deploy/to-proxmox.sh` trägt das mit `LOKI_URL=http://monitoring:3100` ein. Ist Loki weg, werden die Zeilen verworfen und gezählt. Das Journal bleibt, wie es ist. Prompts stehen in keiner Zeile, weder dort noch in Loki.
 
