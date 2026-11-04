@@ -36,7 +36,7 @@ Ohne Proxmox kann der Dienst auch auf einem Mac laufen (`python3 service/server.
 
 ## Die Seite
 
-- **Malen:** Modell, Größe, Anzahl, Seed, Prompt und die LoRAs, die zum Modell passen. Fortschritt, Ergebnisse zum Herunterladen. Englisch malt am besten. Tonwerk übersetzt für seine Cover vorher mit Claude, die Seite tut das nicht.
+- **Malen:** Modell, Größe, Anzahl, Seed, Prompt und die LoRAs, die zum Modell passen. Fortschritt und die Ergebnisse. Der Knopf oben rechts am Bild (oder ein Klick aufs Bild) öffnet eine große Vorschau mit Herunterladen und Löschen; die Pfeiltasten blättern. Die Bilder liegen nur auf der Seite: Wer neu lädt oder löscht, hat sie nicht mehr, der Dienst behält keine. Englisch malt am besten. Tonwerk übersetzt für seine Cover vorher mit Claude, die Seite tut das nicht.
 - **Warteschlange:** Was gerade malt und wer wartet, auch Anfragen anderer Apps.
 - **Modelle:** Lizenz, ob kommerziell nutzbar, Speicher, ob heruntergeladen, und ein Knopf zum Herunterladen (15 bis 35 GB auf die T7; er prüft vorher den Platz). Nie von selbst.
 - **LoRAs:** Hochladen, Name, Modell, Trigger und Stärke ändern, löschen, Krea-2-Stil-LoRAs von Hugging Face holen. Das Modell erkennt der Dienst meist aus der Datei.

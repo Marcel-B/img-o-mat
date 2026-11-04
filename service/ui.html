@@ -43,6 +43,21 @@
   .pictures figure { margin: 0; }
   .pictures img { width: 100%; border-radius: 8px; display: block; background: var(--line); }
   .pictures figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; word-break: break-word; }
+  .pictures .frame { position: relative; }
+  .pictures .frame img { cursor: zoom-in; }
+  .pictures .enlarge { position: absolute; top: 8px; right: 8px; width: 34px; height: 34px; padding: 0; border-radius: 8px; border: 0; background: rgba(0, 0, 0, .55); color: #fff; font-size: 18px; line-height: 34px; }
+  .pictures .enlarge:hover, .pictures .enlarge:focus-visible { background: rgba(0, 0, 0, .8); }
+  dialog.preview { width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 16px; border: 0; background: rgba(10, 10, 12, .92); color: #ececf0; }
+  dialog.preview[open] { display: flex; flex-direction: column; gap: 10px; }
+  dialog.preview::backdrop { background: rgba(0, 0, 0, .6); }
+  dialog.preview .stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  dialog.preview .stage img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; min-width: 0; }
+  dialog.preview .step { flex: none; font-size: 22px; width: 40px; height: 56px; padding: 0; background: rgba(255, 255, 255, .1); color: inherit; border: 0; }
+  dialog.preview .caption { font-size: 13px; color: #b5b5bd; text-align: center; max-height: 5.5em; overflow: auto; word-break: break-word; }
+  dialog.preview .actions { justify-content: center; }
+  dialog.preview .actions a, dialog.preview .actions button { font: inherit; text-decoration: none; border-radius: 8px; padding: 6px 14px; border: 1px solid #3a3a40; background: #26262a; color: inherit; }
+  dialog.preview .actions a { background: #2fbf98; color: #0b1f19; border-color: #2fbf98; }
+  dialog.preview .actions .remove { color: #f2756b; }
   .loras label.check { display: inline-flex; gap: 6px; align-items: center; color: var(--text); font-size: 14px; margin-right: 12px; }
   .loras label.check input { width: auto; }
   @media (max-width: 640px) {
@@ -102,6 +117,19 @@
     <div id="suggestions" style="margin-top:12px"></div>
   </section>
 </main>
+<dialog class="preview" id="preview" aria-label="Bildvorschau">
+  <div class="stage">
+    <button class="step" id="previewPrev" aria-label="Vorheriges Bild">‹</button>
+    <img id="previewImage" alt="">
+    <button class="step" id="previewNext" aria-label="Nächstes Bild">›</button>
+  </div>
+  <div class="caption" id="previewCaption"></div>
+  <div class="row actions">
+    <a id="previewDownload" download>Herunterladen</a>
+    <button class="remove" id="previewDelete">Löschen</button>
+    <button id="previewClose">Schließen</button>
+  </div>
+</dialog>
 <script>
 const $ = id => document.getElementById(id);
 let models = [], loras = [], current = null;
@@ -254,7 +282,8 @@ function handle(name, data, body) {
   if (name === 'image') {
     const url = `data:image/jpeg;base64,${data.b64_json}`;
     const figure = document.createElement('figure');
-    figure.innerHTML = `<a href="${url}" download="img-o-mat-${body.model}-${data.seed}.jpg"><img src="${url}" alt=""></a>
+    figure.dataset.file = `img-o-mat-${body.model}-${data.seed}.jpg`;
+    figure.innerHTML = `<div class="frame"><img src="${url}" alt=""><button class="enlarge" data-enlarge title="Groß ansehen" aria-label="Groß ansehen">⤢</button></div>
       <figcaption>${esc(body.model)} · Seed ${data.seed} · ${data.paintSeconds ?? '?'} s${data.revised_prompt ? '<br>' + esc(data.revised_prompt) : ''}</figcaption>`;
     $('pictures').prepend(figure);
   }
@@ -262,7 +291,55 @@ function handle(name, data, body) {
   if (name === 'error') { $('paintState').innerHTML = `<span class="danger">${esc(data.error.message)}</span>`; $('paintBar').hidden = true; }
 }
 
+// The pictures live only on this page (the service keeps none), so deleting one here removes it for good.
+let shown = null;
+const figures = () => [...document.querySelectorAll('#pictures figure')];
+
+function show(figure) {
+  if (!figure) return;
+  shown = figure;
+  const url = figure.querySelector('img').src;
+  $('previewImage').src = url;
+  $('previewCaption').innerHTML = figure.querySelector('figcaption').innerHTML;
+  $('previewDownload').href = url;
+  $('previewDownload').download = figure.dataset.file;
+  const all = figures(), at = all.indexOf(figure);
+  $('previewPrev').style.visibility = at > 0 ? '' : 'hidden';
+  $('previewNext').style.visibility = at < all.length - 1 ? '' : 'hidden';
+  if (!$('preview').open) $('preview').showModal();
+}
+
+function step(by) {
+  const all = figures();
+  show(all[all.indexOf(shown) + by]);
+}
+
+$('pictures').addEventListener('click', event => {
+  const figure = event.target.closest('figure');
+  if (figure && event.target.closest('img, [data-enlarge]')) show(figure);
+});
+$('previewPrev').addEventListener('click', () => step(-1));
+$('previewNext').addEventListener('click', () => step(1));
+$('previewClose').addEventListener('click', () => $('preview').close());
+$('previewDelete').addEventListener('click', () => {
+  if (!shown || !confirm('Bild löschen? Es ist nur auf dieser Seite und lässt sich nicht zurückholen.')) return;
+  const all = figures(), at = all.indexOf(shown);
+  shown.remove();
+  const next = all[at + 1] || all[at - 1];
+  if (next) show(next); else $('preview').close();
+});
+$('preview').addEventListener('click', event => {
+  if (event.target === $('preview') || event.target.classList.contains('stage')) $('preview').close();
+});
+$('preview').addEventListener('close', () => { shown = null; $('previewImage').removeAttribute('src'); });
+document.addEventListener('keydown', event => {
+  if (!$('preview').open) return;
+  if (event.key === 'ArrowLeft') step(-1);
+  if (event.key === 'ArrowRight') step(1);
+});
+
 document.addEventListener('click', async event => {
+  if (event.target.closest('#preview, #pictures')) return;
   const target = event.target.closest('button');
   if (!target) return;
   try {
