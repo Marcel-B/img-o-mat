@@ -85,6 +85,13 @@ class ServiceTest(unittest.TestCase):
         self.assertTrue(krea["contentFilter"])
         self.assertTrue(krea["startImage"])
 
+    def test_the_page_enlarges_downloads_and_deletes_pictures(self):
+        status, page, _ = self.call("GET", "/")
+        self.assertEqual(status, 200)
+        page = page.decode()
+        for part in ('id="preview"', 'id="previewDownload" download', 'id="previewDelete"', "data-enlarge"):
+            self.assertIn(part, page)
+
     def test_paints_a_picture(self):
         status, body, response = self.paint(seed=7)
         self.assertEqual(status, 200, body)
