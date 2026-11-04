@@ -186,6 +186,29 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(self.call("DELETE", "/v1/loras/Fuchs")[0], 200)
         self.assertEqual(self.call("DELETE", "/v1/loras/Fuchs")[0], 404)
 
+    def test_loras_reach_the_runner_with_their_extension(self):
+        # mlx infers the format from the extension; files are named by their hash alone.
+        sys.path.insert(0, os.path.join(ROOT, "worker"))
+        import common
+        import paint
+
+        folder = os.path.join(self.root, "files")
+        os.makedirs(folder, exist_ok=True)
+        digest = "ab" * 32
+        with open(os.path.join(folder, digest), "wb") as out:
+            out.write(safetensors({}))
+        saved, common.ROOT = common.ROOT, self.root
+        try:
+            for _ in range(2):  # the second picture finds the link from the first
+                request = {"loras": [{"file": digest, "strength": 1.0}], "references": [{"file": digest, "role": "figure"}]}
+                paint.resolve(request)
+                self.assertEqual(request["loras"][0]["path"], os.path.join(folder, digest + ".safetensors"))
+                self.assertEqual(request["references"][0]["path"], os.path.join(folder, digest))
+                with open(request["loras"][0]["path"], "rb") as file:
+                    self.assertEqual(file.read(), safetensors({}))
+        finally:
+            common.ROOT = saved
+
     def test_downloads_a_model(self):
         self.assertFalse(self.model("z-image-turbo")["downloaded"])
         status, state, _ = self.call("POST", "/v1/models/z-image-turbo/download")

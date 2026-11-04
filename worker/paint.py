@@ -81,6 +81,20 @@ def resolve(request: dict) -> None:
             item["path"] = os.path.join(folder, item["file"])
             # Used: probe.py keeps it another month.
             os.utime(item["path"])
+    for lora in request.get("loras") or []:
+        if lora.get("file"):
+            lora["path"] = with_extension(lora["path"], ".safetensors")
+
+
+def with_extension(path: str, extension: str) -> str:
+    """mlx's loader picks the format by the file's extension, and files here are named by their hash alone. A hard link
+    beside the file shares its contents and its time, so probe.py prunes both together after a month."""
+    named = path + extension
+    try:
+        os.link(path, named)
+    except FileExistsError:  # linked for an earlier picture; it may be another inode if the file was sent again
+        os.utime(named)
+    return named
 
 
 def looked_at(request: dict) -> list[str]:
