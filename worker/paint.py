@@ -21,6 +21,9 @@ Out: lines starting with "IMGOMAT " on stdout, each a JSON event:
 Anything else is the runner's own output, which the service keeps for the error message.
 """
 
+# The tests import it under the service's Python, which may be 3.9.
+from __future__ import annotations
+
 import base64
 import io
 import json
