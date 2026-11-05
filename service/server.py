@@ -14,6 +14,7 @@ The API, OpenAI's images API where it has one (README, "Schnittstelle"):
     DELETE /v1/jobs/<id>                    cancel a picture
     HEAD   /v1/files/<sha256>, PUT ...      reference pictures (and LoRAs not in the library), once per file
     GET    /v1/loras, PUT/PATCH/DELETE /v1/loras/<name>, POST /v1/loras/fetch
+    GET    /v1/gallery, POST ..., GET/DELETE /v1/gallery/<name>   pictures kept on the T7 (the page's Speichern)
     GET    /status                          what runs and waits, the worker, the downloads
     GET    /metrics                         numbers for Prometheus (metrics.py), no login, nothing but numbers
     GET    /                                the page
@@ -41,6 +42,7 @@ import config as settings  # noqa: E402
 from catalogue import Catalogue, max_references, takes_loras, takes_start_image  # noqa: E402
 from downloads import Downloads  # noqa: E402
 from files import FileError, Files  # noqa: E402
+from gallery import Gallery, GalleryError  # noqa: E402
 from loki import LokiShipper  # noqa: E402
 from loras import MAX_PER_PICTURE, MAX_STRENGTH, SUGGESTIONS, LoraError, Loras  # noqa: E402
 from metrics import Metrics, folder_bytes, gauge  # noqa: E402
@@ -50,6 +52,8 @@ from worker_link import WorkerLink  # noqa: E402
 
 MAX_PROMPT = 2000
 MAX_N = 4
+# A 2048 x 2048 JPEG at quality 92 is a few MB; base64 makes it a third more.
+MAX_GALLERY_BODY = 24 << 20
 ROLES = ("style", "figure", "place", "start")
 UI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui.html")
 # Tonwerk-AI waits for a cover it asked for; other apps through the gate come after it.
@@ -67,8 +71,9 @@ ROUTES = (
     ("/v1/loras/fetch", re.compile(r"/v1/loras/fetch")),
     ("/v1/loras/<name>", re.compile(r"/v1/loras/[^/]+")),
     ("/v1/jobs/<id>", re.compile(r"/v1/jobs/[^/]+")),
+    ("/v1/gallery/<name>", re.compile(r"/v1/gallery/[^/]+")),
 )
-KNOWN_ROUTES = {"/", "/v1/models", "/v1/images/generations", "/v1/busy", "/v1/loras", "/status", "/metrics"}
+KNOWN_ROUTES = {"/", "/v1/models", "/v1/images/generations", "/v1/busy", "/v1/loras", "/v1/gallery", "/status", "/metrics"}
 
 shipper: LokiShipper | None = None
 
@@ -105,6 +110,7 @@ class Service:
         self.files = Files(config, logger("files"))
         self.loras = Loras(config, self.catalogue, logger("loras"))
         self.downloads = Downloads(self.link, logger("downloads"), self.metrics)
+        self.gallery = Gallery(config, self.link, logger("gallery"))
         self.notifier = Notifier(config.get("onkelBummel"), logger("onkel-bummel"))
         self.painter = Painter(config, self.link, logger("painter"), self.metrics, on_finish=self.notifier.job_finished)
         self.jobs: dict[str, Job] = {}
@@ -264,6 +270,19 @@ class Service:
         self.jobs[job.id] = job
         return job
 
+    def keep(self, body: dict, app: str) -> dict:
+        """A picture the page shows, into the gallery. The page sends it back as it got it (the service keeps no
+        picture after painting), with what it knows about it."""
+        picture = body.get("b64_json")
+        if not isinstance(picture, str) or not picture:
+            raise RequestError(400, "b64_json fehlt.")
+        seed = body.get("seed")
+        meta = {
+            "model": body.get("model"), "prompt": body.get("prompt"), "size": body.get("size"),
+            "seed": seed if isinstance(seed, int) else None, "app": app, "creator": body.get("creator"),
+        }
+        return self.gallery.save(picture, meta)
+
     def files_use(self, digest: str) -> str:
         try:
             return self.files.use(digest)
@@ -325,9 +344,9 @@ class Handler(BaseHTTPRequestHandler):
         """OpenAI's error shape, so clients show the message."""
         self.send_json(status, {"error": {"message": message, "type": "img_o_mat", "code": status}})
 
-    def read_json(self) -> dict:
+    def read_json(self, limit: int = 1 << 20) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
-        if length > 1 << 20:
+        if length > limit:
             raise RequestError(413, "Die Anfrage ist zu groß; Bilder gehen über /v1/files.")
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
@@ -366,7 +385,7 @@ class Handler(BaseHTTPRequestHandler):
         self.status_sent = 0
         try:
             work()
-        except (RequestError, FileError, LoraError) as error:
+        except (RequestError, FileError, LoraError, GalleryError) as error:
             self.send_error_json(error.status, error.message)
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -427,6 +446,17 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif path == "/v1/loras":
             self.send_json(200, service.loras.list())
+        elif path == "/v1/gallery":
+            self.send_json(200, service.gallery.list())
+        elif path.startswith("/v1/gallery/"):
+            body = service.gallery.picture(path[len("/v1/gallery/"):], query.get("thumb") == "1")
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(body)))
+            # A name always means the same picture.
+            self.send_header("Cache-Control", "private, max-age=31536000, immutable")
+            self.end_headers()
+            self.wfile.write(body)
         else:
             self.send_error_json(404, f"Unbekannt: GET {path}")
 
@@ -445,6 +475,10 @@ class Handler(BaseHTTPRequestHandler):
         service = self.service
         if path == "/v1/images/generations":
             self.generate(self.read_json())
+            return
+        if path == "/v1/gallery":
+            saved = service.keep(self.read_json(MAX_GALLERY_BODY), self.app())
+            self.send_json(201 if saved["created"] else 200, saved)
             return
         match = re.fullmatch(r"/v1/models/([^/]+)/download", path)
         if match:
@@ -505,6 +539,10 @@ class Handler(BaseHTTPRequestHandler):
             if not self.service.loras.delete(urllib.parse.unquote(match[1])):
                 raise RequestError(404, "Diese LoRA gibt es nicht.")
             self.send_json(200, {"deleted": True})
+            return
+        match = re.fullmatch(r"/v1/gallery/([^/]+)", path)
+        if match:
+            self.send_json(200, self.service.gallery.delete(match[1]))
             return
         match = re.fullmatch(r"/v1/jobs/([^/]+)", path)
         if match:

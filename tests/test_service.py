@@ -95,6 +95,64 @@ class ServiceTest(unittest.TestCase):
         for part in ('id="preview"', 'id="previewDownload" download', 'id="previewDelete"', "data-enlarge"):
             self.assertIn(part, page)
 
+    def test_keeps_a_picture_in_the_gallery(self):
+        status, body, _ = self.paint(seed=21)
+        self.assertEqual(status, 200, body)
+        picture = body["data"][0]["b64_json"]
+        # Painting alone keeps nothing, whoever asks (Tonwerk-AI here).
+        _, listed, _ = self.call("GET", "/v1/gallery")
+        before = {p["name"] for p in listed["pictures"]}
+        self.assertNotIn(hashlib.sha256(base64.b64decode(picture)).hexdigest()[:12], " ".join(before))
+
+        keep = {"b64_json": picture, "model": "klein-4b", "seed": 21, "size": "1024x1024", "prompt": "a red fox",
+                "creator": "img-o-mat", "contentFilter": False}
+        status, saved, _ = self.call("POST", "/v1/gallery", keep, {"X-Llm-App": "img-o-mat"})
+        self.assertEqual(status, 201, saved)
+        self.assertTrue(saved["created"])
+        status, again, _ = self.call("POST", "/v1/gallery", keep, {"X-Llm-App": "img-o-mat"})
+        self.assertEqual((status, again["name"], again["created"]), (200, saved["name"], False))
+
+        _, listed, _ = self.call("GET", "/v1/gallery")
+        entry = next(p for p in listed["pictures"] if p["name"] == saved["name"])
+        self.assertEqual((entry["model"], entry["seed"], entry["prompt"], entry["app"]), ("klein-4b", 21, "a red fox", "img-o-mat"))
+        self.assertNotIn("contentFilter", entry)
+        self.assertIsNone(listed["disk"])
+        self.assertTrue(os.path.exists(os.path.join(self.root, "gallery", saved["name"] + ".jpg")))
+
+        for path in (f"/v1/gallery/{saved['name']}", f"/v1/gallery/{saved['name']}?thumb=1"):
+            status, data, response = self.call("GET", path)
+            self.assertEqual((status, response.getheader("content-type")), (200, "image/jpeg"))
+            self.assertEqual(data, base64.b64decode(picture))
+        self.assertTrue(os.path.exists(os.path.join(self.root, "gallery-cache", saved["name"] + ".jpg")))
+
+        status, _, _ = self.call("DELETE", f"/v1/gallery/{saved['name']}")
+        self.assertEqual(status, 200)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "gallery-cache", saved["name"] + ".jpg")))
+        status, body, _ = self.call("GET", f"/v1/gallery/{saved['name']}")
+        self.assertEqual(status, 404, body)
+        status, body, _ = self.call("DELETE", f"/v1/gallery/{saved['name']}")
+        self.assertEqual(status, 404, body)
+
+    def test_the_gallery_refuses_what_is_no_picture(self):
+        cases = [
+            ({"b64_json": base64.b64encode(b"GIF89a").decode()}, 400, "kein JPEG"),
+            ({"b64_json": "!!!"}, 400, "Base64"),
+            ({}, 400, "b64_json"),
+        ]
+        for body, code, text in cases:
+            status, answer, _ = self.call("POST", "/v1/gallery", body)
+            self.assertEqual(status, code, answer)
+            self.assertIn(text, answer["error"]["message"])
+        for name in ("../worker.json", "20261105-093000-zzzzzzzzzzzz"):
+            status, _, _ = self.call("GET", "/v1/gallery/" + name)
+            self.assertEqual(status, 404)
+
+    def test_the_page_saves_and_shows_the_gallery(self):
+        _, page, _ = self.call("GET", "/")
+        page = page.decode()
+        for part in ('id="previewSave"', 'data-view="galerie"', 'id="galleryGrid"', "'/v1/gallery'"):
+            self.assertIn(part, page)
+
     def test_paints_a_picture(self):
         status, body, response = self.paint(seed=7)
         self.assertEqual(status, 200, body)
@@ -410,6 +468,42 @@ class SshTest(unittest.TestCase):
         self.assertIsNone(job.error, job.error)
         self.assertEqual(len(job.results), 1)
         self.assertTrue(os.path.exists(os.path.join(self.remote, "files", info["sha256"])))
+
+    def test_keeps_pictures_on_the_worker(self):
+        job = self.service.job_from({"model": "klein-4b", "prompt": "a fox"}, "test", 0)
+        self.service.painter.submit(job)
+        list(job.events(timeout=1))
+        picture = base64.b64encode(job.results[0]["jpeg"]).decode()
+        saved = self.service.keep({"b64_json": picture, "model": "klein-4b", "seed": 1}, "img-o-mat")
+        self.assertTrue(os.path.exists(os.path.join(self.remote, "gallery", saved["name"] + ".jpg")))
+        self.assertFalse(os.path.exists(os.path.join(self.root, "gallery")))
+        self.assertEqual([p["name"] for p in self.service.gallery.list()["pictures"]], [saved["name"]])
+        self.assertEqual(self.service.gallery.picture(saved["name"], thumb=False), job.results[0]["jpeg"])
+        self.service.gallery.delete(saved["name"])
+        self.assertEqual(self.service.gallery.list()["pictures"], [])
+
+    def test_an_unplugged_disk_keeps_nothing(self):
+        with open(os.path.join(self.remote, "worker.json"), "w") as out:
+            json.dump({"python": sys.executable, "scripts": FAKE, "gallery": "/Volumes/img-o-mat-test-weg/galerie"}, out)
+        with self.assertRaises(server.GalleryError) as caught:
+            self.service.keep({"b64_json": base64.b64encode(b"\xff\xd8\xff\xe0").decode()}, "img-o-mat")
+        self.assertEqual(caught.exception.status, 503)
+        self.assertIn("img-o-mat-test-weg ist nicht angeschlossen", caught.exception.message)
+        self.assertFalse(os.path.exists("/Volumes/img-o-mat-test-weg"))
+
+    def test_the_gallery_lies_on_the_disk_of_the_models(self):
+        sys.path.insert(0, os.path.join(ROOT, "worker"))
+        import common
+        self.assertEqual(common.volume_of("/Volumes/T7/Tonwerk/images/models"), "T7")
+        self.assertIsNone(common.volume_of("/Users/marcel/Library/Application Support/img-o-mat/models"))
+        with open(os.path.join(self.remote, "worker.json"), "w") as out:
+            json.dump({"modelCache": "/Volumes/T7/Tonwerk/images/models"}, out)
+        root, common.ROOT = common.ROOT, self.remote
+        try:
+            values = common.settings()
+        finally:
+            common.ROOT = root
+        self.assertEqual((values["gallery"], values["galleryDisk"]), ("/Volumes/T7/img-o-mat/galerie", "T7"))
 
     def test_the_key_runs_nothing_else(self):
         out = __import__("subprocess").run(
