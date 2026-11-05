@@ -74,16 +74,27 @@
   .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
   .bar > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
 
-  /* Paint view: the form stays beside the pictures on wide screens. */
-  /* Narrow: prompt, settings, pictures. Wide: settings on the left, prompt above the pictures on the right; the
-     settings column scrolls on its own so all of it stays reachable. */
+  /* Paint view. Narrow: prompt, settings, pictures, one below the other. Wide: the view fills the window below the top
+     bar; settings on the left, the pictures take about two thirds of the height on the right and scroll on their own,
+     the prompt sits fixed below them in the last third. In both, the LoRA list scrolls on its own so more LoRAs never
+     stretch the settings. */
   .paint { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); grid-template-areas: "prompt" "side" "gallery"; align-items: start; }
   .paint .promptbar { grid-area: prompt; }
   .paint .side { grid-area: side; }
   .paint .gallery { grid-area: gallery; }
+  .loras { max-height: 18rem; overflow-y: auto; overscroll-behavior: contain; margin-left: -8px; margin-right: -8px; padding: 0 8px; }
+  .loras > .label { position: sticky; top: 0; z-index: 1; background: var(--card); margin-bottom: 0; padding-bottom: 5px; }
   @media (min-width: 960px) {
-    .paint { grid-template-columns: 20rem minmax(0, 1fr); grid-template-rows: auto 1fr; grid-template-areas: "side prompt" "side gallery"; }
-    .paint .side { position: sticky; top: 72px; align-self: start; max-height: calc(100vh - 88px); overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius); }
+    body:has(.paint:not([hidden])) { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+    body:has(.paint:not([hidden])) main { flex: 1; min-height: 0; width: 100%; padding-bottom: 16px; }
+    .paint { height: 100%; grid-template-columns: 20rem minmax(0, 1fr); grid-template-rows: minmax(0, 2fr) minmax(0, 1fr); grid-template-areas: "side gallery" "side prompt"; align-items: stretch; }
+    .paint .side { min-height: 0; display: flex; flex-direction: column; }
+    .paint .side > .card:first-child { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
+    .paint .side .loras { flex: 0 1 auto; min-height: 4rem; max-height: none; }
+    .paint .side > .card + .card { flex: none; max-height: 40%; overflow-y: auto; }
+    .paint .gallery { min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius); }
+    .paint .promptbar { min-height: 0; display: flex; flex-direction: column; }
+    .paint .promptbar textarea { flex: 1; min-height: 3rem; resize: none; }
   }
   .promptbar textarea { min-height: 96px; }
   .promptfoot { margin-top: 10px; gap: 10px 12px; }
@@ -470,6 +481,8 @@ function placeholders(body) {
     figure.innerHTML = `<div class="frame">wird gemalt …</div><figcaption>${esc(body.model)}</figcaption>`;
     $('pictures').prepend(figure);
   }
+  // The newest pictures come first; on wide screens the gallery scrolls on its own, so bring them into view.
+  document.querySelector('.paint .gallery').scrollTop = 0;
   updateEmpty();
 }
 
