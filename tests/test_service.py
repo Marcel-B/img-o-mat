@@ -119,9 +119,14 @@ class ServiceTest(unittest.TestCase):
         self.assertIsNone(listed["disk"])
         self.assertTrue(os.path.exists(os.path.join(self.root, "gallery", saved["name"] + ".jpg")))
 
-        for path in (f"/v1/gallery/{saved['name']}", f"/v1/gallery/{saved['name']}?thumb=1"):
-            status, data, response = self.call("GET", path)
-            self.assertEqual((status, response.getheader("content-type")), (200, "image/jpeg"))
+        status, data, response = self.call("GET", f"/v1/gallery/{saved['name']}")
+        self.assertEqual((status, response.getheader("content-type")), (200, "image/jpeg"))
+        self.assertEqual(data, base64.b64decode(picture))
+        # On a Mac sips makes the small copy (a new JPEG); elsewhere the picture itself stands in for it.
+        status, data, response = self.call("GET", f"/v1/gallery/{saved['name']}?thumb=1")
+        self.assertEqual((status, response.getheader("content-type")), (200, "image/jpeg"))
+        self.assertTrue(data.startswith(b"\xff\xd8\xff"))
+        if not os.path.exists("/usr/bin/sips"):
             self.assertEqual(data, base64.b64decode(picture))
         self.assertTrue(os.path.exists(os.path.join(self.root, "gallery-cache", saved["name"] + ".jpg")))
 
