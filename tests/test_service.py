@@ -9,6 +9,7 @@ import hashlib
 import http.client
 import json
 import os
+import queue
 import shutil
 import struct
 import sys
@@ -16,11 +17,13 @@ import tempfile
 import threading
 import time
 import unittest
+from http.server import BaseHTTPRequestHandler
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "service"))
 
 import config as settings  # noqa: E402
+import notify  # noqa: E402
 import server  # noqa: E402
 
 FAKE = os.path.join(ROOT, "tests", "fake")
@@ -276,6 +279,99 @@ class ServiceTest(unittest.TestCase):
         self.assertGreater(busy["memoryGb"], 0)
         for job in (late, urgent, blocker):
             painter.cancel(job)
+
+    def test_tells_onkel_bummel_when_a_picture_is_done(self):
+        with FakeOnkelBummel() as bummel:
+            token = os.path.join(self.root, "onkel-bummel.token")
+            with open(token, "w") as out:
+                out.write("ob_test\n")
+            self.service.notifier.settings = {"url": bummel.url, "tokenFile": token, "topic": "bilder", "click": "http://img-o-mat:1236/"}
+            try:
+                status, body, response = self.paint(prompt="a red fox in the snow", n=2)
+                self.assertEqual(status, 200, body)
+                headers, message = bummel.received.get(timeout=10)
+                self.assertEqual(headers["Authorization"], "Bearer ob_test")
+                self.assertEqual(headers["Idempotency-Key"], response.getheader("X-Img-Job"))
+                self.assertEqual(message["topic"], "bilder")
+                self.assertEqual(message["title"], "2 Bilder fertig (FLUX.2 Klein 4B)")
+                self.assertIn("tonwerk-ai", message["message"])
+                self.assertIn("a red fox in the snow", message["message"])
+                self.assertEqual(message["click"], "http://img-o-mat:1236/")
+                self.assertEqual(len(message["images"]), 2)
+                self.assertTrue(base64.b64decode(message["images"][0]["data"]).startswith(b"\xff\xd8"))
+
+                status, body, _ = self.paint(prompt="please fail")
+                self.assertEqual(status, 500)
+                _, message = bummel.received.get(timeout=10)
+                self.assertEqual((message["title"], message["priority"]), ("Bild fehlgeschlagen (FLUX.2 Klein 4B)", 4))
+                self.assertTrue(message["message"].startswith("the model broke"))
+                self.assertNotIn("images", message)
+
+                # Asked not to, or an app the config leaves out: nothing.
+                self.assertEqual(self.paint(notify=False)[0], 200)
+                self.service.notifier.settings["apps"] = ["img-o-mat"]
+                self.assertEqual(self.paint()[0], 200)
+                time.sleep(0.5)
+                self.assertTrue(bummel.received.empty())
+            finally:
+                self.service.notifier.settings = {}
+
+    def test_onkel_bummel_retries_its_own_trouble_but_not_a_wrong_token(self):
+        sleep = notify.time.sleep
+        notify.time.sleep = lambda seconds: None
+        try:
+            with FakeOnkelBummel(answers=[503, 201]) as bummel:
+                notifier = server.Notifier({"url": bummel.url, "token": "ob_x"}, lambda line: None)
+                self.assertTrue(notifier.send({"topic": "t", "message": "m"}, "k1"))
+                self.assertEqual(bummel.received.qsize(), 2)
+            with FakeOnkelBummel(answers=[401]) as bummel:
+                logged = []
+                notifier = server.Notifier({"url": bummel.url, "token": "ob_wrong"}, logged.append)
+                self.assertFalse(notifier.send({"topic": "t", "message": "m"}, "k2"))
+                self.assertEqual(bummel.received.qsize(), 1)
+                self.assertIn("401", logged[0])
+            logged = []
+            self.assertFalse(server.Notifier({"url": "http://127.0.0.1:9", "token": "ob_x"}, logged.append).send({}, "k3"))
+            self.assertIn("nicht erreichbar", logged[0])
+            logged = []
+            self.assertFalse(server.Notifier({"url": "http://127.0.0.1:9"}, logged.append).send({}, "k4"))
+            self.assertIn("kein Token", logged[0])
+        finally:
+            notify.time.sleep = sleep
+
+
+class FakeOnkelBummel:
+    """POST /api/v1/messages as Onkel Bummel takes it; answers are the status codes to give, then 201."""
+
+    def __init__(self, answers=()):
+        self.received = queue.Queue()
+        self.answers = list(answers)
+        fake = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, format, *args):
+                pass
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                fake.received.put((dict(self.headers), body))
+                code = fake.answers.pop(0) if fake.answers else 201
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+        self.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}"
+
+    def __enter__(self):
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        return self
+
+    def __exit__(self, *exc):
+        self.httpd.shutdown()
+        self.httpd.server_close()
 
 
 if __name__ == "__main__":

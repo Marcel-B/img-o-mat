@@ -44,6 +44,7 @@ from files import FileError, Files  # noqa: E402
 from loki import LokiShipper  # noqa: E402
 from loras import MAX_PER_PICTURE, MAX_STRENGTH, SUGGESTIONS, LoraError, Loras  # noqa: E402
 from metrics import Metrics, folder_bytes, gauge  # noqa: E402
+from notify import Notifier  # noqa: E402
 from painter import Job, Painter  # noqa: E402
 from worker_link import WorkerLink  # noqa: E402
 
@@ -104,7 +105,8 @@ class Service:
         self.files = Files(config, logger("files"))
         self.loras = Loras(config, self.catalogue, logger("loras"))
         self.downloads = Downloads(self.link, logger("downloads"), self.metrics)
-        self.painter = Painter(config, self.link, logger("painter"), self.metrics)
+        self.notifier = Notifier(config.get("onkelBummel"), logger("onkel-bummel"))
+        self.painter = Painter(config, self.link, logger("painter"), self.metrics, on_finish=self.notifier.job_finished)
         self.jobs: dict[str, Job] = {}
         threading.Thread(target=self._housekeeping, daemon=True, name="housekeeping").start()
         threading.Thread(target=self._watch_worker, daemon=True, name="worker watch").start()
@@ -255,6 +257,8 @@ class Service:
             "prompt": prompt, "n": n, "width": width, "height": height, "seed": seed, "steps": steps,
             "loras": loras, "references": references, "files": files,
             "creator": str(body.get("creator") or "")[:60] or None,
+            # Only an explicit false keeps Onkel Bummel quiet (notify.py); the config decides the rest.
+            "notify": body.get("notify") is not False,
         }
         job = Job(model, request, app, priority)
         self.jobs[job.id] = job
