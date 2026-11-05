@@ -8,10 +8,12 @@ Die Bildmodelle von oi-o-mat als Dienst für alle Apps: FLUX.2 Klein 4B und 9B, 
  Apps ──► LLM-Schranke (oi-o-mat:1235) ──┐
                                          ├──► img-o-mat (Proxmox-Container, :1236) ──ssh──► oi-o-mat malt
  Tonwerk-AI (direkt, mit Vorrang) ───────┘        Seite, Warteschlange, LoRAs              Modelle auf der T7
+                                                                                         Galerie auf der T7
 ```
 
 - **Der Dienst** läuft in einem kleinen Debian-Container auf Proxmox (512 MB). Dort liegen die Seite, die Warteschlange, die LoRA-Bibliothek und hochgeladene Referenzbilder. Er ist reines Python ohne Pakete.
 - **Gemalt wird auf oi-o-mat.** Für jedes Bild startet der Dienst per SSH einen Prozess mit mflux oder flux3-mlx, der das Modell lädt, malt und wieder geht. So wird der Speicher nach jedem Bild ganz frei, und zwischen den Bildern läuft auf oi-o-mat nichts vom Dienst. Die Modelle bleiben, wo sie sind: im Hugging-Face-Cache, den Tonwerk schon benutzt hat (auf der T7).
+- **Die Galerie** liegt auch auf oi-o-mat, auf derselben Platte wie die Modelle (`img-o-mat/galerie` ganz oben auf der T7). Gespeichert wird nur, was jemand auf der Seite mit Speichern behält; Bilder für Tonwerk und andere Apps landen dort nie. Ist die T7 nicht angesteckt, sagt die Seite das, statt auf die interne Platte zu schreiben. Ein anderer Ort geht mit `"gallery": "/Volumes/…"` in `worker.json` auf oi-o-mat.
 - **Der SSH-Schlüssel** des Dienstes darf auf oi-o-mat nur `worker/launch.py` starten (erzwungener Befehl in `authorized_keys`), keine Shell, keine Weiterleitung.
 - **Ein Bild nach dem anderen.** Tonwerk-AI fragt mit Vorrang (`X-Img-Priority: 0`), andere Apps kommen über die LLM-Schranke, die entscheidet, wer welches Modell nutzen darf, und sie zurückhält, solange Tonwerk arbeitet.
 - **Lizenzen:** Krea 2 Turbo, FLUX 3 Klein und FLUX.2 Klein 9B prüfen jedes Bild mit Falconsais NSFW-Klassifikator, bevor es herausgeht (Krea-Lizenz §4.2, FLUX-Lizenzen §2.e). Das legt der Katalog fest, keine Anfrage kann es abschalten. Krea 2 und FLUX 3 laufen nur auf einem Mac mit mindestens 32 GB. Jedes Bild trägt in XMP, dass es KI-generiert ist (EU AI Act Art. 50(2)), mit Modell und App.
@@ -62,9 +64,10 @@ Mit [Onkel Bummel](https://github.com/Marcel-B/onkel-bummel) schickt der Dienst 
 
 ## Die Seite
 
-Reines HTML, CSS und JavaScript in einer Datei (`service/ui.html`), ohne Framework, Bibliotheken oder Web-Fonts. Oben stehen drei Bereiche (Malen, Modelle, LoRAs; die Adresse merkt sich, welcher offen ist) und ob der Mac, der malt, antwortet. Hell oder dunkel folgt dem System.
+Reines HTML, CSS und JavaScript in einer Datei (`service/ui.html`), ohne Framework, Bibliotheken oder Web-Fonts. Oben stehen vier Bereiche (Malen, Modelle, LoRAs, Galerie; die Adresse merkt sich, welcher offen ist) und ob der Mac, der malt, antwortet. Hell oder dunkel folgt dem System.
 
-- **Malen:** Links Modell, Größe, Anzahl, Seed, die LoRAs, die zum Modell passen (mit eigenem Scrollbereich, wenn es viele sind), und die Warteschlange; rechts oben die Bilder (etwa zwei Drittel der Höhe, scrollen für sich, das neueste zuerst) und fest darunter der Prompt mit Fortschritt; auf dem Handy erst der Prompt, dann die Einstellungen, dann die Bilder; solange gemalt wird, hält ein Platzhalter in der gewählten Größe die Stelle frei. Strg/⌘ + Enter im Prompt malt. Der Knopf oben rechts am Bild (oder ein Klick aufs Bild) öffnet eine große Vorschau mit Herunterladen und Löschen; die Pfeiltasten blättern. Die Bilder liegen nur auf der Seite: Wer neu lädt oder löscht, hat sie nicht mehr, der Dienst behält keine. Englisch malt am besten. Tonwerk übersetzt für seine Cover vorher mit Claude, die Seite tut das nicht.
+- **Malen:** Links Modell, Größe, Anzahl, Seed, die LoRAs, die zum Modell passen (mit eigenem Scrollbereich, wenn es viele sind), und die Warteschlange; rechts oben die Bilder (etwa zwei Drittel der Höhe, scrollen für sich, das neueste zuerst) und fest darunter der Prompt mit Fortschritt; auf dem Handy erst der Prompt, dann die Einstellungen, dann die Bilder; solange gemalt wird, hält ein Platzhalter in der gewählten Größe die Stelle frei. Strg/⌘ + Enter im Prompt malt. Der Knopf oben rechts am Bild (oder ein Klick aufs Bild) öffnet eine große Vorschau mit Herunterladen, Speichern und Löschen; die Pfeiltasten blättern. Die Bilder liegen nur auf der Seite: Wer neu lädt oder löscht, hat sie nicht mehr, der Dienst behält keine. Speichern legt ein Bild in die Galerie auf der T7 (mit Modell, Seed, Größe und Prompt); dasselbe Bild zweimal wird nur einmal gespeichert. Englisch malt am besten. Tonwerk übersetzt für seine Cover vorher mit Claude, die Seite tut das nicht.
+- **Galerie:** Die gespeicherten Bilder, das neueste zuerst, als kleine Vorschau. Ein Klick öffnet die große Vorschau mit Herunterladen und Löschen (löscht das Bild auf der T7). Die kleinen Vorschauen macht `sips` auf oi-o-mat beim Speichern, der Dienst hebt sie auf, damit die Galerie schnell aufgeht.
 - **Warteschlange:** Was gerade malt und wer wartet, auch Anfragen anderer Apps.
 - **Modelle:** Lizenz, ob kommerziell nutzbar, Speicher, ob heruntergeladen, und ein Knopf zum Herunterladen (15 bis 35 GB auf die T7; er prüft vorher den Platz). Nie von selbst.
 - **LoRAs:** Oben wählst du ein Modell. Darunter stehen die LoRAs, die für dieses Modell schon auf der Platte liegen (Name, Modell, Trigger und Stärke ändern, löschen), und die, die du von Hugging Face laden kannst (bisher nur Krea 2 Turbo, Krea hat für die anderen Modelle keine offiziellen). Eigene Dateien lädst du unten hoch; das Modell erkennt der Dienst meist aus der Datei, sonst gilt das oben gewählte.
@@ -82,6 +85,9 @@ OpenAI-kompatibel, wo OpenAI etwas hat, also gehen auch dessen Clients. Fehler h
 | `HEAD`/`PUT /v1/files/<sha256>` | Referenzbild (oder LoRA außerhalb der Bibliothek) einmal hochladen, danach per Hash nennen |
 | `GET /v1/loras`, `PUT`/`PATCH`/`DELETE /v1/loras/<name>`, `POST /v1/loras/fetch` | die LoRA-Bibliothek; `PUT` nimmt die Datei als Inhalt, `label`, `model`, `trigger`, `strength` als Query |
 | `GET /v1/busy` | was gerade malt: `busy`, `app`, `model`, `memoryGb`, `since`, `waiting`; billig, Tonwerk fragt es, bevor es den Speicher belegt |
+| `GET /v1/gallery` | die gespeicherten Bilder (`name`, `model`, `seed`, `size`, `prompt`, `app`, `savedAt`, `bytes`) und `disk`; `503`, wenn die Platte fehlt |
+| `POST /v1/gallery` | ein Bild behalten: `{"b64_json", "model", "seed", "size", "prompt"}`; `201` neu, `200` schon da, Antwort `{"name", "created"}` |
+| `GET`/`DELETE /v1/gallery/<name>` | das Bild als JPEG (`?thumb=1` klein) oder löschen |
 | `GET /status` | oi-o-mat (Speicher, Platz, Token), was malt, was wartet, die letzten Bilder, Downloads |
 
 ```sh
@@ -124,6 +130,8 @@ Das Dashboard und das Ziel liegen im Monitoring-Stack (Tonwerk-AI, `deploy/monit
 Python 3.9 oder neuer, ohne Pakete. `python3 -m unittest discover tests` spielt den ganzen Weg gegen nachgestellte Maler (`tests/fake`) durch, lokal und über einen nachgestellten `ssh`, der wie der erzwungene Befehl arbeitet. Die echten Maler (`worker/paint.py`, `fetch.py`) brauchen einen Mac mit Apple Silicon.
 
 ## Was getestet ist
+
+Stand 2026-11-05: Die Galerie läuft in den Tests lokal und über den nachgestellten `ssh` (speichern, doppelt speichern, auflisten, ausliefern, löschen, fehlende Platte), und die Seite einmal in Chromium mit den nachgestellten Malern (Speichern in der Vorschau, Galerie, Löschen). Auf oi-o-mat mit der echten T7 und `sips`, und im Proxmox-Container, ist sie noch nicht gelaufen.
 
 Stand 2026-11-05: Die Nachricht an Onkel Bummel ist nur gegen einen nachgestellten Onkel Bummel in den Tests gelaufen, noch nicht gegen den echten.
 

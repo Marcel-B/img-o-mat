@@ -2,7 +2,9 @@
 Hugging Face token. install.sh --worker copies this folder to <root>/worker/ and writes <root>/worker.json:
 
     {"modelCache": "/Volumes/T7/...", "tokenFile": "~/.config/tonwerk/huggingface.token",
-     "python": "<root>/env/bin/python", "flux3Python": "<root>/flux3/bin/python"}
+     "python": "<root>/env/bin/python", "flux3Python": "<root>/flux3/bin/python", "gallery": "/Volumes/T7/..."}
+
+Without "gallery" the kept pictures go on the disk the models are on (img-o-mat/galerie at its top), else <root>/gallery.
 
 The scripts run with the runner's Python (paint.py, fetch.py) or any Python 3.9 (probe.py), started by the service over
 SSH or, where the service paints on its own Mac, as plain child processes.
@@ -24,14 +26,25 @@ def expand(path: str) -> str:
     return os.path.abspath(os.path.expanduser(path))
 
 
+def volume_of(path: str) -> str | None:
+    """The external disk a path lies on (/Volumes/<name>/...), followed through links: on oi-o-mat the model cache is
+    a link from the Library to the T7. None for the Mac's own disk."""
+    parts = os.path.realpath(path).split(os.sep)
+    return parts[2] if len(parts) > 3 and parts[1] == "Volumes" else None
+
+
 def settings() -> dict:
     try:
         with open(os.path.join(ROOT, "worker.json")) as file:
             values = json.load(file)
     except FileNotFoundError:
         values = {}
+    cache = expand(values.get("modelCache") or os.path.join(ROOT, "models"))
+    disk = volume_of(cache)
+    gallery = expand(values["gallery"]) if values.get("gallery") else (
+        os.path.join("/Volumes", disk, "img-o-mat", "galerie") if disk else os.path.join(ROOT, "gallery"))
     return {
-        "modelCache": expand(values.get("modelCache") or os.path.join(ROOT, "models")),
+        "modelCache": cache,
         "tokenFiles": [expand(values["tokenFile"])] if values.get("tokenFile") else [
             expand("~/.config/img-o-mat/huggingface.token"),
             # Tonwerk-AI's place from before the service, so the token need not move.
@@ -40,6 +53,8 @@ def settings() -> dict:
         "python": expand(values.get("python") or os.path.join(ROOT, "env", "bin", "python")),
         "flux3Python": expand(values.get("flux3Python") or os.path.join(ROOT, "flux3", "bin", "python")),
         "files": expand(values.get("files") or os.path.join(ROOT, "files")),
+        "gallery": gallery,
+        "galleryDisk": volume_of(gallery),
         # Tests put fake paint.py and fetch.py here.
         "scripts": expand(values.get("scripts") or HERE),
     }

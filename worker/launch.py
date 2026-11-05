@@ -4,6 +4,7 @@
     launch.py fetch           a model's download, with mflux's Python
     launch.py probe           what this Mac has
     launch.py receive <sha>   a file on stdin into the files folder
+    launch.py gallery ...     the kept pictures (gallery.py: list, save, get, delete)
 
 Over SSH the service's key is only allowed this script (install-worker.sh writes it into ~/.ssh/authorized_keys as
 restrict,command="/usr/bin/python3 <root>/worker/launch.py --ssh"): sshd runs it whatever the service asks and leaves
@@ -99,6 +100,10 @@ def main() -> int:
     command = sys.argv[1] if len(sys.argv) > 1 else ""
     if command == "receive" and len(sys.argv) > 2:
         return receive(sys.argv[2])
+    if command == "gallery":
+        # Short like the probe, and the names it takes are checked there.
+        import gallery
+        return gallery.main(sys.argv[2:])
     if command == "probe":
         # Short and harmless; no watcher needed.
         return subprocess.call([sys.executable, os.path.join(common.HERE, SCRIPTS["probe"])])
@@ -107,7 +112,7 @@ def main() -> int:
         runner = sys.argv[2] if len(sys.argv) > 2 else "mflux"
         python = values["flux3Python"] if runner == "flux3-mlx" else values["python"]
         return run(SCRIPTS[command], python, values["scripts"])
-    print("Aufruf: launch.py paint <runner> | fetch | probe | receive <sha256>", file=sys.stderr)
+    print("Aufruf: launch.py paint <runner> | fetch | probe | receive <sha256> | gallery ...", file=sys.stderr)
     return 2
 
 

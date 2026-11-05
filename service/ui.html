@@ -27,7 +27,7 @@
   .warn { color: var(--warn); }
   .small { font-size: 13px; }
 
-  /* Top bar: name, the three views, and whether the Mac that paints answers. */
+  /* Top bar: name, the four views, and whether the Mac that paints answers. */
   .topbar { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
   .topbar .inner { max-width: 80rem; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 8px 20px; flex-wrap: wrap; }
   .brand { font-weight: 700; font-size: 18px; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; }
@@ -142,6 +142,8 @@
   dialog.preview .actions a, dialog.preview .actions button { font: inherit; font-size: 14px; text-decoration: none; border-radius: 8px; padding: 6px 14px; border: 1px solid #3a3a40; background: #26262a; color: inherit; }
   dialog.preview .actions a { background: #2fbf98; color: #0b1f19; border-color: #2fbf98; }
   dialog.preview .actions .remove { color: #f2756b; }
+  dialog.preview .actions .save:disabled { opacity: 1; color: #2fbf98; }
+  .pictures .saved { color: var(--accent); font-weight: 550; }
 
   /* Models and LoRAs: one card per entry instead of wide tables. */
   .view-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -188,6 +190,7 @@
       <a href="#malen" data-view="malen">Malen</a>
       <a href="#modelle" data-view="modelle">Modelle</a>
       <a href="#loras" data-view="loras">LoRAs <span class="count" id="loraCount" hidden></span></a>
+      <a href="#galerie" data-view="galerie">Galerie <span class="count" id="galleryCount" hidden></span></a>
     </nav>
     <div class="status" id="workerBox"><span class="dot"></span><span id="worker">verbindet …</span></div>
   </div>
@@ -233,7 +236,7 @@
     </div>
     <div class="gallery">
       <div class="pictures" id="pictures"></div>
-      <div class="empty" id="picturesEmpty"><b>Noch keine Bilder</b>Was du hier malst, bleibt nur auf dieser Seite, bis du sie neu lädst.</div>
+      <div class="empty" id="picturesEmpty"><b>Noch keine Bilder</b>Was du hier malst, bleibt nur auf dieser Seite, bis du sie neu lädst. Was du behalten willst, legt Speichern in der großen Ansicht in die Galerie.</div>
     </div>
   </section>
 
@@ -265,6 +268,15 @@
       <div id="loraState" class="muted small" style="margin-top:8px"></div>
     </div>
   </section>
+
+  <section id="view-galerie" data-view-panel="galerie" hidden>
+    <div class="view-head">
+      <div><h1>Galerie</h1><p id="galleryWhere">Die Bilder, die du gespeichert hast, auf der Platte des Macs, der malt.</p></div>
+      <button id="galleryRefresh">Neu laden</button>
+    </div>
+    <div class="pictures" id="galleryGrid"></div>
+    <div class="empty" id="galleryEmpty"><b>Noch nichts gespeichert</b>Öffne beim Malen ein Bild groß und drücke Speichern.</div>
+  </section>
 </main>
 
 <dialog class="preview" id="preview" aria-label="Bildvorschau">
@@ -276,6 +288,7 @@
   <div class="caption" id="previewCaption"></div>
   <div class="row actions">
     <a id="previewDownload" download>Herunterladen</a>
+    <button class="save" id="previewSave">Speichern</button>
     <button class="remove" id="previewDelete">Löschen</button>
     <button id="previewClose">Schließen</button>
   </div>
@@ -294,14 +307,16 @@ async function api(path, options = {}) {
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-// Views live in the address (#malen, #modelle, #loras) so a reload or a bookmark keeps the place.
-const views = ['malen', 'modelle', 'loras'];
+// Views live in the address (#malen, #modelle, #loras, #galerie) so a reload or a bookmark keeps the place.
+const views = ['malen', 'modelle', 'loras', 'galerie'];
 function showView() {
   const view = views.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'malen';
   document.querySelectorAll('[data-view-panel]').forEach(panel => { panel.hidden = panel.dataset.viewPanel !== view; });
   document.querySelectorAll('nav.tabs a').forEach(a => {
     if (a.dataset.view === view) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
+  // After the script has run: the gallery's state is declared further down.
+  if (view === 'galerie') setTimeout(() => loadGallery());
 }
 window.addEventListener('hashchange', showView);
 showView();
@@ -531,6 +546,8 @@ function handle(name, data, body) {
     const url = `data:image/jpeg;base64,${data.b64_json}`;
     const figure = document.createElement('figure');
     figure.dataset.file = `img-o-mat-${body.model}-${data.seed}.jpg`;
+    // What Speichern sends along, so the gallery can say what the picture was.
+    Object.assign(figure.dataset, { model: body.model, seed: data.seed, size: body.size, prompt: data.revised_prompt || body.prompt });
     figure.style.setProperty('--ratio', body.size.replace('x', ' / '));
     figure.innerHTML = `<div class="frame"><img src="${url}" alt=""><button class="enlarge" data-enlarge title="Groß ansehen" aria-label="Groß ansehen">⤢</button></div>
       <figcaption>${esc(body.model)} · Seed ${data.seed} · ${data.paintSeconds ?? '?'} s${data.revised_prompt ? '<span class="prompt">' + esc(data.revised_prompt) + '</span>' : ''}</figcaption>`;
@@ -543,19 +560,29 @@ function handle(name, data, body) {
   if (name === 'error') { $('paintState').innerHTML = `<span class="danger">${esc(data.error.message)}</span>`; $('paintBar').hidden = true; }
 }
 
-// The pictures live only on this page (the service keeps none), so deleting one here removes it for good.
+// Painted pictures live only on this page (the service keeps none) until Speichern puts one into the gallery on the
+// T7; the gallery's pictures live only there. The preview serves both and steps within the grid it was opened from.
 let shown = null;
-const figures = () => [...document.querySelectorAll('#pictures figure:not(.pending)')];
+const inGallery = figure => figure.closest('#galleryGrid') !== null;
+const figures = (from = shown) => [...(from && inGallery(from) ? $('galleryGrid') : $('pictures')).querySelectorAll('figure:not(.pending)')];
+
+function renderSave(figure) {
+  const button = $('previewSave');
+  button.hidden = inGallery(figure);
+  button.disabled = !!figure.dataset.saved;
+  button.textContent = figure.dataset.saved ? `Gespeichert${galleryDisk ? ' auf ' + galleryDisk : ''} ✓` : `Speichern${galleryDisk ? ' auf ' + galleryDisk : ''}`;
+}
 
 function show(figure) {
   if (!figure) return;
   shown = figure;
-  const url = figure.querySelector('img').src;
+  const url = figure.dataset.full || figure.querySelector('img').src;
   $('previewImage').src = url;
   $('previewCaption').innerHTML = figure.querySelector('figcaption').innerHTML;
   $('previewDownload').href = url;
   $('previewDownload').download = figure.dataset.file;
-  const all = figures(), at = all.indexOf(figure);
+  renderSave(figure);
+  const all = figures(figure), at = all.indexOf(figure);
   $('previewPrev').style.visibility = at > 0 ? '' : 'hidden';
   $('previewNext').style.visibility = at < all.length - 1 ? '' : 'hidden';
   if (!$('preview').open) $('preview').showModal();
@@ -566,18 +593,91 @@ function step(by) {
   show(all[all.indexOf(shown) + by]);
 }
 
-$('pictures').addEventListener('click', event => {
-  const figure = event.target.closest('figure:not(.pending)');
-  if (figure && event.target.closest('img, [data-enlarge]')) show(figure);
-});
+for (const grid of ['pictures', 'galleryGrid']) {
+  $(grid).addEventListener('click', event => {
+    const figure = event.target.closest('figure:not(.pending)');
+    if (figure && event.target.closest('img, [data-enlarge]')) show(figure);
+  });
+}
+
+// The gallery is read when its view opens (each time after something was saved), not with the page: it crosses to the
+// Mac that paints and its disk may be unplugged, which the painting does not care about.
+let galleryDisk = null, galleryStale = true, galleryLoading = false;
+
+function updateGalleryEmpty() {
+  const count = $('galleryGrid').children.length;
+  $('galleryEmpty').hidden = !!count || $('galleryGrid').dataset.failed === '1';
+  $('galleryCount').hidden = !count;
+  $('galleryCount').textContent = count;
+}
+
+function galleryFigure(p) {
+  const figure = document.createElement('figure');
+  figure.dataset.name = p.name;
+  figure.dataset.full = `/v1/gallery/${p.name}`;
+  figure.dataset.file = `img-o-mat-${p.model || 'bild'}-${p.seed ?? p.name}.jpg`;
+  if (p.size) figure.style.setProperty('--ratio', p.size.replace('x', ' / '));
+  const when = p.savedAt ? new Date(p.savedAt.replace(/([+-]\d\d)(\d\d)$/, '$1:$2')) : null;
+  const date = when && !isNaN(when) ? when.toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  figure.innerHTML = `<div class="frame"><img src="/v1/gallery/${p.name}?thumb=1" loading="lazy" alt=""><button class="enlarge" data-enlarge title="Groß ansehen" aria-label="Groß ansehen">⤢</button></div>
+    <figcaption>${esc(p.model || '?')}${p.seed != null ? ' · Seed ' + esc(p.seed) : ''}${date ? ' · ' + esc(date) : ''}${p.prompt ? '<span class="prompt">' + esc(p.prompt) + '</span>' : ''}</figcaption>`;
+  return figure;
+}
+
+async function loadGallery(force = false) {
+  if (galleryLoading || (!galleryStale && !force)) return;
+  galleryLoading = true;
+  $('galleryWhere').textContent = 'lädt …';
+  try {
+    const list = await api('/v1/gallery');
+    galleryDisk = list.disk;
+    $('galleryGrid').dataset.failed = '0';
+    $('galleryGrid').replaceChildren(...list.pictures.map(galleryFigure));
+    $('galleryWhere').textContent = `${list.pictures.length === 1 ? 'Ein Bild' : list.pictures.length + ' Bilder'}${list.disk ? ' auf der Platte ' + list.disk : ''}, das neueste zuerst.`;
+    galleryStale = false;
+  } catch (error) {
+    $('galleryGrid').dataset.failed = '1';
+    $('galleryWhere').innerHTML = `<span class="danger">${esc(error.message)}</span>`;
+  } finally {
+    galleryLoading = false;
+    updateGalleryEmpty();
+  }
+}
+$('galleryRefresh').addEventListener('click', () => loadGallery(true));
 $('previewPrev').addEventListener('click', () => step(-1));
 $('previewNext').addEventListener('click', () => step(1));
 $('previewClose').addEventListener('click', () => $('preview').close());
-$('previewDelete').addEventListener('click', () => {
-  if (!shown || !confirm('Bild löschen? Es ist nur auf dieser Seite und lässt sich nicht zurückholen.')) return;
+$('previewSave').addEventListener('click', async () => {
+  const figure = shown;
+  if (!figure || figure.dataset.saved || inGallery(figure)) return;
+  $('previewSave').disabled = true; $('previewSave').textContent = 'speichert …';
+  try {
+    const { model, seed, size, prompt } = figure.dataset;
+    const saved = await api('/v1/gallery', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-llm-app': 'img-o-mat' },
+      body: JSON.stringify({ b64_json: figure.querySelector('img').src.split(',')[1], model, seed: Number(seed), size, prompt, creator: 'img-o-mat' }),
+    });
+    figure.dataset.saved = saved.name;
+    const caption = figure.querySelector('figcaption');
+    if (!caption.querySelector('.saved')) caption.insertAdjacentHTML('afterbegin', '<span class="saved">gespeichert</span> · ');
+    galleryStale = true;
+  } catch (error) { alert(error.message); }
+  if (shown === figure) { renderSave(figure); $('previewCaption').innerHTML = figure.querySelector('figcaption').innerHTML; }
+});
+$('previewDelete').addEventListener('click', async () => {
+  if (!shown) return;
+  const gallery = inGallery(shown);
+  const question = gallery ? `Bild aus der Galerie${galleryDisk ? ' auf ' + galleryDisk : ''} löschen? Das lässt sich nicht zurückholen.`
+    : shown.dataset.saved ? 'Bild von dieser Seite nehmen? In der Galerie bleibt es.'
+    : 'Bild löschen? Es ist nur auf dieser Seite und lässt sich nicht zurückholen.';
+  if (!confirm(question)) return;
   const all = figures(), at = all.indexOf(shown);
+  if (gallery) {
+    try { await api(`/v1/gallery/${shown.dataset.name}`, { method: 'DELETE' }); }
+    catch (error) { alert(error.message); return; }
+  }
   shown.remove();
-  updateEmpty();
+  updateEmpty(); updateGalleryEmpty();
   const next = all[at + 1] || all[at - 1];
   if (next) show(next); else $('preview').close();
 });
@@ -592,7 +692,7 @@ document.addEventListener('keydown', event => {
 });
 
 document.addEventListener('click', async event => {
-  if (event.target.closest('#preview, #pictures')) return;
+  if (event.target.closest('#preview, #pictures, #galleryGrid')) return;
   const target = event.target.closest('button');
   if (!target) return;
   try {
