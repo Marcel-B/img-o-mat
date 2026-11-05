@@ -3,50 +3,110 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>img-o-mat</title>
 <style>
   :root {
-    --bg: #f6f5f2; --card: #ffffff; --text: #1d1d1f; --muted: #6b6b70; --line: #e2e0db;
-    --accent: #0f8a6c; --accent-text: #ffffff; --warn: #b4521b; --danger: #b3261e;
+    --bg: #f4f3ef; --card: #ffffff; --sunken: #f8f7f4; --text: #1d1d1f; --muted: #6b6b70; --line: #e4e2dc; --line-strong: #d3d0c8;
+    --accent: #0f8a6c; --accent-soft: #e2f3ee; --accent-text: #ffffff; --warn: #b4521b; --warn-soft: #fbeee4; --danger: #b3261e; --danger-soft: #fbe9e7;
+    --shadow: 0 1px 2px rgba(20, 20, 20, .04), 0 4px 14px rgba(20, 20, 20, .04);
+    --radius: 14px;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #141416; --card: #1e1e21; --text: #ececf0; --muted: #9a9aa2; --line: #303035;
-      --accent: #2fbf98; --accent-text: #0b1f19; --warn: #e39158; --danger: #f2756b;
+      --bg: #121214; --card: #1c1c1f; --sunken: #161618; --text: #ececf0; --muted: #9a9aa2; --line: #2c2c31; --line-strong: #3a3a40;
+      --accent: #2fbf98; --accent-soft: #163a31; --accent-text: #0b1f19; --warn: #e39158; --warn-soft: #3a2618; --danger: #f2756b; --danger-soft: #3d1c1a;
+      --shadow: none;
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  main { max-width: 72rem; margin: 0 auto; padding: 16px; }
-  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
-  h1 { font-size: 22px; margin: 0; }
-  h2 { font-size: 17px; margin: 0 0 10px; }
   .muted { color: var(--muted); }
   .danger { color: var(--danger); }
   .warn { color: var(--warn); }
-  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
-  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
-  input, select, textarea { font: inherit; font-size: 16px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; width: 100%; }
-  textarea { min-height: 90px; resize: vertical; }
-  button { font: inherit; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .small { font-size: 13px; }
+
+  /* Top bar: name, the three views, and whether the Mac that paints answers. */
+  .topbar { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+  .topbar .inner { max-width: 80rem; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 8px 20px; flex-wrap: wrap; }
+  .brand { font-weight: 700; font-size: 18px; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; }
+  .brand::before { content: ""; width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, var(--accent), #6fd3b7); }
+  nav.tabs { display: flex; gap: 2px; background: var(--sunken); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+  nav.tabs a { color: var(--muted); text-decoration: none; padding: 5px 12px; border-radius: 7px; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
+  nav.tabs a:hover { color: var(--text); }
+  nav.tabs a[aria-current="page"] { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+  nav.tabs .count { font-size: 11px; background: var(--line); color: var(--muted); border-radius: 99px; padding: 0 6px; }
+  .status { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); min-width: 0; }
+  .status .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); }
+  .status.ok .dot { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .status.bad .dot { background: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
+  .status.bad { color: var(--danger); }
+
+  main { max-width: 80rem; margin: 0 auto; padding: 18px 16px 40px; }
+  h2 { font-size: 15px; margin: 0; font-weight: 650; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); }
+  .side .card + .card { margin-top: 14px; }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+
+  label, .label { display: block; font-size: 12.5px; font-weight: 550; color: var(--muted); margin-bottom: 5px; }
+  input, select, textarea { font: inherit; font-size: 16px; color: var(--text); background: var(--sunken); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; width: 100%; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); background: var(--card); }
+  textarea { min-height: 130px; resize: vertical; line-height: 1.5; }
+  button, .button { font: inherit; font-size: 14px; font-weight: 550; border: 1px solid var(--line-strong); background: var(--card); color: var(--text); border-radius: 9px; padding: 7px 13px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  button:hover { border-color: var(--muted); }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-  button:disabled { opacity: .5; cursor: default; }
-  .grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+  button.primary:hover { filter: brightness(1.06); }
+  button.quiet { border-color: transparent; background: transparent; color: var(--muted); }
+  button.quiet:hover { color: var(--danger); border-color: transparent; }
+  button:disabled { opacity: .5; cursor: default; filter: none; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .tags span { display: inline-block; font-size: 12px; border: 1px solid var(--line); border-radius: 99px; padding: 0 8px; margin: 2px 4px 2px 0; }
-  table { width: 100%; border-collapse: collapse; }
-  td, th { text-align: left; padding: 8px 6px; border-top: 1px solid var(--line); vertical-align: top; }
-  th { font-size: 13px; color: var(--muted); font-weight: 600; border-top: 0; }
-  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+  .field + .field { margin-top: 12px; }
+  .pair { display: grid; gap: 10px; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 5px; }
+  kbd { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .tags span { font-size: 11.5px; border: 1px solid var(--line); background: var(--sunken); color: var(--muted); border-radius: 99px; padding: 1px 8px; }
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 550; border-radius: 99px; padding: 2px 9px; background: var(--sunken); color: var(--muted); border: 1px solid var(--line); }
+  .badge.ok { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
   .bar > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
-  .pictures { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); margin-top: 12px; }
-  .pictures figure { margin: 0; }
-  .pictures img { width: 100%; border-radius: 8px; display: block; background: var(--line); }
-  .pictures figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; word-break: break-word; }
+
+  /* Paint view: the form stays beside the pictures on wide screens. */
+  .paint { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+  @media (min-width: 960px) {
+    .paint { grid-template-columns: 22rem minmax(0, 1fr); }
+    .paint .side { position: sticky; top: 72px; }
+  }
+  .loras .check { display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 14px; font-weight: 400; padding: 6px 8px; border-radius: 8px; margin: 0; cursor: pointer; }
+  .loras .check:hover { background: var(--sunken); }
+  .loras .check input { width: auto; accent-color: var(--accent); }
+  .paintbox { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .paintbox #paint { flex: 1; padding: 10px 14px; font-size: 15px; }
+  #paintState { font-size: 13px; margin-top: 8px; min-height: 1.2em; }
+  #paintBar { margin-top: 8px; }
+
+  .queue div + div { margin-top: 4px; }
+  .queue .now { font-weight: 550; }
+  .queue .recent { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+
+  .pictures { display: grid; gap: 14px; align-items: start; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+  .pictures figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+  .pictures img { width: 100%; display: block; background: var(--line); aspect-ratio: var(--ratio, 1); object-fit: cover; }
+  .pictures figcaption { font-size: 12px; color: var(--muted); padding: 8px 10px 10px; word-break: break-word; }
+  .pictures figcaption .prompt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; }
   .pictures .frame { position: relative; }
   .pictures .frame img { cursor: zoom-in; }
   .pictures .enlarge { position: absolute; top: 8px; right: 8px; width: 34px; height: 34px; padding: 0; border-radius: 8px; border: 0; background: rgba(0, 0, 0, .55); color: #fff; font-size: 18px; line-height: 34px; }
   .pictures .enlarge:hover, .pictures .enlarge:focus-visible { background: rgba(0, 0, 0, .8); }
+  .pictures .pending .frame { aspect-ratio: var(--ratio, 1); background: linear-gradient(100deg, var(--sunken) 30%, var(--line) 50%, var(--sunken) 70%) 0 0 / 300% 100%; animation: shimmer 1.6s linear infinite; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
+  @keyframes shimmer { to { background-position: -150% 0; } }
+  @media (prefers-reduced-motion: reduce) { .pictures .pending .frame { animation: none; } .bar > div { transition: none; } }
+  .empty { border: 1.5px dashed var(--line-strong); border-radius: var(--radius); padding: 48px 20px; text-align: center; color: var(--muted); }
+  .empty b { display: block; color: var(--text); font-size: 15px; margin-bottom: 4px; }
+
   dialog.preview { width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 16px; border: 0; background: rgba(10, 10, 12, .92); color: #ececf0; }
   dialog.preview[open] { display: flex; flex-direction: column; gap: 10px; }
   dialog.preview::backdrop { background: rgba(0, 0, 0, .6); }
@@ -54,69 +114,117 @@
   dialog.preview .stage img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; min-width: 0; }
   dialog.preview .step { flex: none; font-size: 22px; width: 40px; height: 56px; padding: 0; background: rgba(255, 255, 255, .1); color: inherit; border: 0; }
   dialog.preview .caption { font-size: 13px; color: #b5b5bd; text-align: center; max-height: 5.5em; overflow: auto; word-break: break-word; }
+  dialog.preview .caption .prompt { display: block; }
   dialog.preview .actions { justify-content: center; }
-  dialog.preview .actions a, dialog.preview .actions button { font: inherit; text-decoration: none; border-radius: 8px; padding: 6px 14px; border: 1px solid #3a3a40; background: #26262a; color: inherit; }
+  dialog.preview .actions a, dialog.preview .actions button { font: inherit; font-size: 14px; text-decoration: none; border-radius: 8px; padding: 6px 14px; border: 1px solid #3a3a40; background: #26262a; color: inherit; }
   dialog.preview .actions a { background: #2fbf98; color: #0b1f19; border-color: #2fbf98; }
   dialog.preview .actions .remove { color: #f2756b; }
-  .loras label.check { display: inline-flex; gap: 6px; align-items: center; color: var(--text); font-size: 14px; margin-right: 12px; }
-  .loras label.check input { width: auto; }
-  @media (max-width: 640px) {
-    .models td:nth-child(3), .models th:nth-child(3) { display: none; }
-    .lorastable td:nth-child(4), .lorastable th:nth-child(4) { display: none; }
-  }
+
+  /* Models and LoRAs: one card per entry instead of wide tables. */
+  .view-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .view-head h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
+  .view-head p { margin: 2px 0 0; color: var(--muted); font-size: 13.5px; }
+  .list { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr)); }
+  .item { display: flex; flex-direction: column; gap: 10px; }
+  .item .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .item .name { font-weight: 650; font-size: 15px; }
+  .facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: 13px; margin: 0; }
+  .facts dt { color: var(--muted); }
+  .facts dd { margin: 0; }
+  .item .foot { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+  .item .foot .bar { margin-top: 2px; }
+  .lora-fields { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
+  .lora-fields .wide { grid-column: 1 / -1; }
+  .lora-fields input, .lora-fields select { font-size: 14px; padding: 6px 9px; }
+  .upload { display: grid; gap: 10px; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto; align-items: end; }
+  @media (max-width: 640px) { .upload { grid-template-columns: 1fr; } }
+  .upload input { height: 42px; }
+  .upload input[type="file"] { padding: 8px; font-size: 14px; }
+  .upload button { height: 42px; }
+  .suggest { display: flex; flex-wrap: wrap; gap: 8px; }
 </style>
 </head>
 <body>
+<header class="topbar">
+  <div class="inner">
+    <div class="brand">img-o-mat</div>
+    <nav class="tabs" aria-label="Bereiche">
+      <a href="#malen" data-view="malen">Malen</a>
+      <a href="#modelle" data-view="modelle">Modelle</a>
+      <a href="#loras" data-view="loras">LoRAs <span class="count" id="loraCount" hidden></span></a>
+    </nav>
+    <div class="status" id="workerBox"><span class="dot"></span><span id="worker">verbindet …</span></div>
+  </div>
+</header>
+
 <main>
-  <header>
-    <h1>img-o-mat</h1>
-    <span class="muted" id="worker">…</span>
-  </header>
-
-  <section>
-    <h2>Malen</h2>
-    <div class="grid">
-      <div><label for="model">Modell</label><select id="model"></select></div>
-      <div><label for="size">Größe</label>
-        <select id="size">
-          <option>1024x1024</option><option>1344x768</option><option>768x1344</option><option>1920x1088</option><option>1088x1920</option><option>512x512</option>
-        </select></div>
-      <div><label for="n">Anzahl</label><select id="n"><option>1</option><option>2</option><option>3</option><option>4</option></select></div>
-      <div><label for="seed">Seed (leer: zufällig)</label><input id="seed" inputmode="numeric"></div>
+  <section id="view-malen" class="paint" data-view-panel="malen">
+    <div class="side">
+      <div class="card">
+        <div class="field"><label for="prompt">Prompt</label>
+          <textarea id="prompt" maxlength="2000" placeholder="a red fox in fresh snow, morning light, 35 mm photo"></textarea>
+          <div class="hint">Englisch malt am besten. <kbd>⌘</kbd>/<kbd>Strg</kbd> + <kbd>Enter</kbd> malt.</div></div>
+        <div class="field"><label for="model">Modell</label><select id="model"></select></div>
+        <div class="field pair">
+          <div><label for="size">Größe</label>
+            <select id="size">
+              <option value="1024x1024">1024 × 1024 · 1:1</option>
+              <option value="1344x768">1344 × 768 · quer</option>
+              <option value="768x1344">768 × 1344 · hoch</option>
+              <option value="1920x1088">1920 × 1088 · 16:9</option>
+              <option value="1088x1920">1088 × 1920 · 9:16</option>
+              <option value="512x512">512 × 512 · klein</option>
+            </select></div>
+          <div><label for="n">Anzahl</label><select id="n"><option>1</option><option>2</option><option>3</option><option>4</option></select></div>
+        </div>
+        <div class="field"><label for="seed">Seed</label><input id="seed" inputmode="numeric" placeholder="zufällig"></div>
+        <div class="field loras" id="loraPicks" hidden></div>
+        <div class="paintbox">
+          <div class="row">
+            <button class="primary" id="paint">Malen</button>
+            <button id="cancel" hidden>Abbrechen</button>
+          </div>
+          <div class="bar" id="paintBar" hidden><div></div></div>
+          <div id="paintState" class="muted"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Warteschlange</h2></div>
+        <div id="queue" class="queue muted small">…</div>
+      </div>
     </div>
-    <div style="margin-top:10px"><label for="prompt">Prompt (Englisch malt am besten)</label><textarea id="prompt" maxlength="2000"></textarea></div>
-    <div class="loras" id="loraPicks" style="margin-top:8px"></div>
-    <div class="row" style="margin-top:10px">
-      <button class="primary" id="paint">Malen</button>
-      <button id="cancel" hidden>Abbrechen</button>
-      <span id="paintState" class="muted"></span>
+    <div>
+      <div class="pictures" id="pictures"></div>
+      <div class="empty" id="picturesEmpty"><b>Noch keine Bilder</b>Was du hier malst, bleibt nur auf dieser Seite, bis du sie neu lädst.</div>
     </div>
-    <div class="bar" id="paintBar" hidden><div></div></div>
-    <div class="pictures" id="pictures"></div>
   </section>
 
-  <section>
-    <h2>Warteschlange</h2>
-    <div id="queue" class="muted">…</div>
-  </section>
-
-  <section>
-    <div class="row" style="justify-content:space-between"><h2>Modelle</h2><button id="refresh">Neu prüfen</button></div>
-    <table class="models"><thead><tr><th>Modell</th><th>Lizenz</th><th>Speicher</th><th>Stand</th></tr></thead><tbody id="models"></tbody></table>
-  </section>
-
-  <section>
-    <h2>LoRAs</h2>
-    <table class="lorastable"><thead><tr><th>Name</th><th>Modell</th><th>Trigger</th><th>Stärke</th><th></th></tr></thead><tbody id="loras"></tbody></table>
-    <div class="row" style="margin-top:12px">
-      <input type="file" id="loraFile" accept=".safetensors" style="max-width:20rem">
-      <input id="loraName" placeholder="Name" style="max-width:14rem">
-      <button id="loraUpload">Hochladen</button>
-      <span id="loraState" class="muted"></span>
+  <section id="view-modelle" data-view-panel="modelle" hidden>
+    <div class="view-head">
+      <div><h1>Modelle</h1><p>Heruntergeladen wird nur auf Knopfdruck, vorher prüft der Dienst den Platz.</p></div>
+      <button id="refresh">Neu prüfen</button>
     </div>
-    <div id="suggestions" style="margin-top:12px"></div>
+    <div class="list" id="models"></div>
+  </section>
+
+  <section id="view-loras" data-view-panel="loras" hidden>
+    <div class="view-head">
+      <div><h1>LoRAs</h1><p>Änderungen an Name, Modell, Trigger und Stärke werden sofort gespeichert.</p></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Hochladen</h2></div>
+      <div class="upload">
+        <div><label for="loraFile">Datei (.safetensors)</label><input type="file" id="loraFile" accept=".safetensors"></div>
+        <div><label for="loraName">Name</label><input id="loraName" placeholder="z. B. aquarell"></div>
+        <button id="loraUpload" class="primary">Hochladen</button>
+      </div>
+      <div id="loraState" class="muted small" style="margin-top:8px"></div>
+      <div id="suggestions"></div>
+    </div>
+    <div class="list" id="loras" style="margin-top:14px"></div>
   </section>
 </main>
+
 <dialog class="preview" id="preview" aria-label="Bildvorschau">
   <div class="stage">
     <button class="step" id="previewPrev" aria-label="Vorheriges Bild">‹</button>
@@ -144,24 +252,51 @@ async function api(path, options = {}) {
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// Views live in the address (#malen, #modelle, #loras) so a reload or a bookmark keeps the place.
+const views = ['malen', 'modelle', 'loras'];
+function showView() {
+  const view = views.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'malen';
+  document.querySelectorAll('[data-view-panel]').forEach(panel => { panel.hidden = panel.dataset.viewPanel !== view; });
+  document.querySelectorAll('nav.tabs a').forEach(a => {
+    if (a.dataset.view === view) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  });
+}
+window.addEventListener('hashchange', showView);
+showView();
+
 function modelState(m) {
   if (m.download?.state === 'running' || m.download?.state === 'waiting') {
-    const share = m.download.fraction != null ? ` ${Math.round(m.download.fraction * 100)} %` : '';
-    return `<span>lädt herunter${share} (${m.download.gb ?? 0} GB)</span>`;
+    const share = m.download.fraction != null ? Math.round(m.download.fraction * 100) : null;
+    return `<span>lädt herunter${share != null ? ` ${share} %` : ''} (${m.download.gb ?? 0} GB)</span><div class="bar"><div style="width:${share ?? 0}%"></div></div>`;
   }
   if (!m.available) return `<span class="warn">${esc(m.unavailable)}</span>`;
   const failed = m.download?.state === 'failed' ? `<div class="danger">${esc(m.download.error)}</div>` : '';
-  if (m.downloaded) return `<span>bereit</span>${failed}`;
+  if (m.downloaded) return failed;
   const token = m.gated && m.tokenFound === false ? '<div class="warn">braucht einen Hugging-Face-Token</div>' : '';
-  return `<button data-download="${esc(m.id)}">Herunterladen (${m.downloadGb} GB)</button>${token}${failed}`;
+  return `<div><button data-download="${esc(m.id)}">Herunterladen (${m.downloadGb} GB)</button></div>${token}${failed}`;
+}
+
+function modelBadge(m) {
+  if (m.download?.state === 'running' || m.download?.state === 'waiting') return '<span class="badge">lädt</span>';
+  if (!m.available) return '<span class="badge warn">nicht verfügbar</span>';
+  if (m.downloaded) return '<span class="badge ok">bereit</span>';
+  return '<span class="badge">nicht geladen</span>';
 }
 
 function renderModels() {
-  $('models').innerHTML = models.map(m => `<tr>
-    <td><b>${esc(m.label)}</b><div class="tags">${m.lettering ? '<span>Schrift</span>' : ''}${m.loras ? '<span>LoRAs</span>' : ''}${m.references ? `<span>${m.references} Referenzen</span>` : ''}${m.startImage ? '<span>Startbild</span>' : ''}${m.contentFilter ? '<span>Inhaltsfilter</span>' : ''}${m.minSystemGb ? `<span>ab ${m.minSystemGb} GB</span>` : ''}</div></td>
-    <td>${esc(m.license)}<div class="muted">${m.commercial ? 'kommerziell nutzbar' : 'nur privat'}${m.gated ? ', gesperrt' : ''}</div></td>
-    <td>${m.memoryGb} GB</td>
-    <td>${modelState(m)}</td></tr>`).join('');
+  $('models').innerHTML = models.map(m => {
+    const state = modelState(m);
+    return `<div class="card item">
+      <div class="top"><div><div class="name">${esc(m.label)}</div>
+        <div class="tags">${m.lettering ? '<span>Schrift</span>' : ''}${m.loras ? '<span>LoRAs</span>' : ''}${m.references ? `<span>${m.references} Referenzen</span>` : ''}${m.startImage ? '<span>Startbild</span>' : ''}${m.contentFilter ? '<span>Inhaltsfilter</span>' : ''}${m.minSystemGb ? `<span>ab ${m.minSystemGb} GB</span>` : ''}</div></div>
+        ${modelBadge(m)}</div>
+      <dl class="facts">
+        <dt>Lizenz</dt><dd>${esc(m.license)}</dd>
+        <dt>Nutzung</dt><dd>${m.commercial ? 'kommerziell nutzbar' : 'nur privat'}${m.gated ? ', gesperrt' : ''}</dd>
+        <dt>Speicher</dt><dd>${m.memoryGb} GB</dd>
+      </dl>
+      ${state ? `<div class="foot">${state}</div>` : ''}</div>`;
+  }).join('') || '<div class="empty">Keine Modelle.</div>';
   const chosen = $('model').value;
   $('model').innerHTML = models.map(m => `<option value="${esc(m.id)}" ${m.available ? '' : 'disabled'}>${esc(m.label)}${m.available ? (m.downloaded ? '' : ' (lädt beim ersten Bild)') : ' (nicht verfügbar)'}</option>`).join('');
   if (chosen && models.some(m => m.id === chosen)) $('model').value = chosen;
@@ -175,40 +310,48 @@ function renderModels() {
 function renderPicks() {
   const model = models.find(m => m.id === $('model').value);
   const fitting = model?.loras ? loras.filter(l => l.model === model.id) : [];
+  const picked = new Set([...document.querySelectorAll('#loraPicks input:checked')].map(i => i.value));
+  $('loraPicks').hidden = !fitting.length;
   $('loraPicks').innerHTML = fitting.length
-    ? '<label>LoRAs (bis zu 3)</label>' + fitting.map(l => `<label class="check"><input type="checkbox" value="${esc(l.name)}">${esc(l.label)}</label>`).join('')
+    ? '<span class="label">LoRAs (bis zu 3)</span>' + fitting.map(l => `<label class="check"><input type="checkbox" value="${esc(l.name)}" ${picked.has(l.name) ? 'checked' : ''}>${esc(l.label)}${l.trigger ? ` <span class="muted small">${esc(l.trigger)}</span>` : ''}</label>`).join('')
     : '';
 }
 
 function renderLoras(list) {
   loras = list.loras;
+  $('loraCount').hidden = !loras.length;
+  $('loraCount').textContent = loras.length;
   const options = id => '<option value="">unbekannt</option>' + models.filter(m => m.loras).map(m => `<option value="${esc(m.id)}" ${m.id === id ? 'selected' : ''}>${esc(m.label)}</option>`).join('');
-  $('loras').innerHTML = loras.map(l => `<tr data-lora="${esc(l.name)}">
-    <td><input value="${esc(l.label)}" data-field="label"><div class="muted">${esc(l.name)} · ${(l.sizeBytes / 1e6).toFixed(0)} MB${l.source ? ' · ' + esc(l.source) : ''}</div></td>
-    <td><select data-field="model">${options(l.model)}</select></td>
-    <td><input value="${esc(l.trigger ?? '')}" data-field="trigger" placeholder="kein Trigger"></td>
-    <td><input value="${l.strength}" data-field="strength" inputmode="decimal" style="max-width:5rem"></td>
-    <td><button data-delete="${esc(l.name)}">Löschen</button></td></tr>`).join('')
-    || '<tr><td colspan="5" class="muted">Noch keine LoRAs.</td></tr>';
+  $('loras').innerHTML = loras.map(l => `<div class="card item" data-lora="${esc(l.name)}">
+    <div class="top"><div><div class="name">${esc(l.label)}</div><div class="muted small">${esc(l.name)} · ${(l.sizeBytes / 1e6).toFixed(0)} MB${l.source ? ' · ' + esc(l.source) : ''}</div></div>
+      <button class="quiet" data-delete="${esc(l.name)}">Löschen</button></div>
+    <div class="lora-fields">
+      <div class="wide"><label>Name</label><input value="${esc(l.label)}" data-field="label"></div>
+      <div class="wide"><label>Modell</label><select data-field="model">${options(l.model)}</select></div>
+      <div><label>Trigger</label><input value="${esc(l.trigger ?? '')}" data-field="trigger" placeholder="kein Trigger"></div>
+      <div><label>Stärke</label><input value="${l.strength}" data-field="strength" inputmode="decimal"></div>
+    </div></div>`).join('')
+    || '<div class="empty"><b>Noch keine LoRAs</b>Lade oben eine Datei hoch.</div>';
   $('suggestions').innerHTML = list.suggestions.length
-    ? '<label>Krea-2-Stil-LoRAs von Hugging Face</label><div class="row">' + list.suggestions.map(s =>
-        `<button data-fetch="${esc(s.name)}" ${list.fetching.includes(s.name) ? 'disabled' : ''}>${esc(s.label)}${list.fetching.includes(s.name) ? ' …' : ''}</button>`).join('') + '</div>'
+    ? '<div class="paintbox"><span class="label">Krea-2-Stil-LoRAs von Hugging Face holen</span><div class="suggest">' + list.suggestions.map(s =>
+        `<button data-fetch="${esc(s.name)}" ${list.fetching.includes(s.name) ? 'disabled' : ''}>${esc(s.label)}${list.fetching.includes(s.name) ? ' …' : ''}</button>`).join('') + '</div></div>'
     : '';
   renderPicks();
 }
 
 function renderStatus(status) {
   const probe = status.worker.probe;
+  $('workerBox').className = 'status ' + (probe ? 'ok' : 'bad');
   $('worker').innerHTML = probe
-    ? `malt auf ${esc(probe.host || status.worker.name)} · ${probe.memoryGb ? Math.round(probe.memoryGb) + ' GB' : ''}${probe.freeGb != null ? ' · ' + probe.freeGb + ' GB frei für Modelle' : ''}`
-    : `<span class="danger">${esc(status.worker.error || 'der Mac, der malt, antwortet nicht')}</span>`;
+    ? `malt auf ${esc(probe.host || status.worker.name)}${probe.memoryGb ? ' · ' + Math.round(probe.memoryGb) + ' GB' : ''}${probe.freeGb != null ? ' · ' + probe.freeGb + ' GB frei für Modelle' : ''}`
+    : esc(status.worker.error || 'der Mac, der malt, antwortet nicht');
   const p = status.painter;
-  const line = job => `${esc(job.app)} · ${esc(job.model)} · ${esc(job.stage)}${job.stage !== 'queued' ? ' ' + Math.round(job.fraction * 100) + ' %' : ''}`;
+  const line = job => `${esc(job.app)} · ${esc(job.model)} · ${esc(stages[job.stage] || job.stage)}${job.stage !== 'queued' ? ' ' + Math.round(job.fraction * 100) + ' %' : ''}`;
   const parts = [];
-  if (p.running) parts.push(`<div>Jetzt: ${line(p.running)}</div>`);
+  if (p.running) parts.push(`<div class="now">Jetzt: ${line(p.running)}</div>`);
   p.queue.forEach((job, i) => parts.push(`<div>${i + 1}. ${line(job)}</div>`));
   if (!parts.length) parts.push('<div>Nichts zu tun.</div>');
-  if (p.recent.length) parts.push('<div style="margin-top:6px">Zuletzt: ' + p.recent.slice(0, 5).map(r => `${esc(r.app)} ${esc(r.model)} ${r.error ? '<span class="danger">' + esc(r.error) + '</span>' : '✓'}`).join(' · ') + '</div>');
+  if (p.recent.length) parts.push('<div class="recent">Zuletzt: ' + p.recent.slice(0, 5).map(r => `${esc(r.app)} ${esc(r.model)} ${r.error ? '<span class="danger">' + esc(r.error) + '</span>' : '✓'}`).join(' · ') + '</div>');
   $('queue').innerHTML = parts.join('');
 }
 
@@ -219,7 +362,8 @@ async function load(fresh = false) {
     renderModels();
     renderLoras(l);
   } catch (error) {
-    $('worker').innerHTML = `<span class="danger">${esc(error.message)}</span>`;
+    $('workerBox').className = 'status bad';
+    $('worker').textContent = error.message;
   }
 }
 
@@ -233,9 +377,33 @@ async function poll() {
   } catch { /* the next round tries again */ }
 }
 
+function updateEmpty() {
+  $('picturesEmpty').hidden = !!$('pictures').children.length;
+}
+
+// Placeholders hold the spot of the pictures still being painted, in the size that was asked for.
+function placeholders(body) {
+  const [w, h] = body.size.split('x').map(Number);
+  for (let i = 0; i < body.n; i++) {
+    const figure = document.createElement('figure');
+    figure.className = 'pending';
+    figure.style.setProperty('--ratio', `${w} / ${h}`);
+    figure.innerHTML = `<div class="frame">wird gemalt …</div><figcaption>${esc(body.model)}</figcaption>`;
+    $('pictures').prepend(figure);
+  }
+  updateEmpty();
+}
+
+function dropPlaceholders() {
+  document.querySelectorAll('#pictures figure.pending').forEach(f => f.remove());
+  updateEmpty();
+}
+
 async function paint() {
+  if ($('paint').disabled) return;
   const loraNames = [...document.querySelectorAll('#loraPicks input:checked')].map(i => i.value);
   if (loraNames.length > 3) { $('paintState').textContent = 'Höchstens drei LoRAs.'; return; }
+  if (!$('prompt').value.trim()) { $('paintState').textContent = 'Erst einen Prompt schreiben.'; $('prompt').focus(); return; }
   const body = {
     model: $('model').value, prompt: $('prompt').value, size: $('size').value, n: Number($('n').value),
     stream: true, creator: 'img-o-mat', loras: loraNames.map(name => ({ name })),
@@ -245,6 +413,7 @@ async function paint() {
   $('paint').disabled = true; $('cancel').hidden = false; $('paintBar').hidden = false;
   $('paintBar').firstElementChild.style.width = '0';
   $('paintState').textContent = 'wird angefragt …';
+  placeholders(body);
   try {
     const response = await fetch('/v1/images/generations', { method: 'POST', headers: { 'content-type': 'application/json', 'x-llm-app': 'img-o-mat' }, body: JSON.stringify(body) });
     if (!response.ok) throw new Error((await response.json()).error?.message || `HTTP ${response.status}`);
@@ -266,8 +435,10 @@ async function paint() {
     }
   } catch (error) {
     $('paintState').innerHTML = `<span class="danger">${esc(error.message)}</span>`;
+    $('paintBar').hidden = true;
   } finally {
     $('paint').disabled = false; $('cancel').hidden = true; current = null;
+    dropPlaceholders();
   }
 }
 
@@ -283,9 +454,13 @@ function handle(name, data, body) {
     const url = `data:image/jpeg;base64,${data.b64_json}`;
     const figure = document.createElement('figure');
     figure.dataset.file = `img-o-mat-${body.model}-${data.seed}.jpg`;
+    figure.style.setProperty('--ratio', body.size.replace('x', ' / '));
     figure.innerHTML = `<div class="frame"><img src="${url}" alt=""><button class="enlarge" data-enlarge title="Groß ansehen" aria-label="Groß ansehen">⤢</button></div>
-      <figcaption>${esc(body.model)} · Seed ${data.seed} · ${data.paintSeconds ?? '?'} s${data.revised_prompt ? '<br>' + esc(data.revised_prompt) : ''}</figcaption>`;
-    $('pictures').prepend(figure);
+      <figcaption>${esc(body.model)} · Seed ${data.seed} · ${data.paintSeconds ?? '?'} s${data.revised_prompt ? '<span class="prompt">' + esc(data.revised_prompt) + '</span>' : ''}</figcaption>`;
+    // A finished picture takes the place of the last placeholder, so the order stays the order of painting.
+    const pending = [...document.querySelectorAll('#pictures figure.pending')];
+    if (pending.length) pending[pending.length - 1].replaceWith(figure); else $('pictures').prepend(figure);
+    updateEmpty();
   }
   if (name === 'done') { $('paintState').textContent = 'fertig'; $('paintBar').hidden = true; }
   if (name === 'error') { $('paintState').innerHTML = `<span class="danger">${esc(data.error.message)}</span>`; $('paintBar').hidden = true; }
@@ -293,7 +468,7 @@ function handle(name, data, body) {
 
 // The pictures live only on this page (the service keeps none), so deleting one here removes it for good.
 let shown = null;
-const figures = () => [...document.querySelectorAll('#pictures figure')];
+const figures = () => [...document.querySelectorAll('#pictures figure:not(.pending)')];
 
 function show(figure) {
   if (!figure) return;
@@ -315,7 +490,7 @@ function step(by) {
 }
 
 $('pictures').addEventListener('click', event => {
-  const figure = event.target.closest('figure');
+  const figure = event.target.closest('figure:not(.pending)');
   if (figure && event.target.closest('img, [data-enlarge]')) show(figure);
 });
 $('previewPrev').addEventListener('click', () => step(-1));
@@ -325,6 +500,7 @@ $('previewDelete').addEventListener('click', () => {
   if (!shown || !confirm('Bild löschen? Es ist nur auf dieser Seite und lässt sich nicht zurückholen.')) return;
   const all = figures(), at = all.indexOf(shown);
   shown.remove();
+  updateEmpty();
   const next = all[at + 1] || all[at - 1];
   if (next) show(next); else $('preview').close();
 });
@@ -363,18 +539,21 @@ document.addEventListener('click', async event => {
 });
 
 document.addEventListener('change', async event => {
-  const row = event.target.closest('tr[data-lora]');
-  if (!row) return;
+  const item = event.target.closest('[data-lora]');
+  if (!item || !event.target.dataset.field) return;
   const field = event.target.dataset.field;
   const value = field === 'strength' ? Number(event.target.value.replace(',', '.')) : event.target.value;
   try {
-    await api(`/v1/loras/${encodeURIComponent(row.dataset.lora)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ [field]: value }) });
+    await api(`/v1/loras/${encodeURIComponent(item.dataset.lora)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ [field]: value }) });
     renderLoras(await api('/v1/loras'));
   } catch (error) { alert(error.message); }
 });
 
 $('model').addEventListener('change', renderPicks);
 $('paint').addEventListener('click', paint);
+$('prompt').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); paint(); }
+});
 $('cancel').addEventListener('click', () => current && api(`/v1/jobs/${current}`, { method: 'DELETE' }).catch(() => {}));
 $('refresh').addEventListener('click', () => load(true));
 $('loraFile').addEventListener('change', () => {
