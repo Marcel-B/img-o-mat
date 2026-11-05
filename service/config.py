@@ -5,7 +5,10 @@
      "tokenFile": "~/.config/img-o-mat/huggingface.token", "systemMemoryGb": null, "minFreeGb": 20,
      "timeoutMinutes": 90, "keepFilesDays": 7, "models": [...],
      "metrics": {"apps": ["tonwerk-ai", "3d-o-mat", "img-o-mat"]},
-     "loki": {"url": "http://monitoring:3100", "host": "proxmox"}}
+     "loki": {"url": "http://monitoring:3100", "host": "proxmox"},
+     "onkelBummel": {"url": "https://onkel-bummel.example", "tokenFile": "...", "topic": "img-o-mat"}}
+
+"onkelBummel" sends a message when a picture is done (notify.py); without it nothing is sent.
 
 Where the Python environments and the models lie is the worker's business (worker/common.py, worker.json on
 oi-o-mat). The token here is only for fetching LoRAs from Hugging Face; the one on oi-o-mat downloads the models.

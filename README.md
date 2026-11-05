@@ -46,6 +46,20 @@ Ab dann schaut launchd alle fünf Minuten nach, ob `origin/main` neu ist. Wenn j
 
 Ohne Proxmox kann der Dienst auch auf einem Mac laufen (`python3 service/server.py`, Einstellungen in `~/.config/img-o-mat/config.json`, `"worker": {"ssh": "marcel@oi-o-mat"}`). Ohne `worker` malt er auf dem eigenen Mac.
 
+### Nachricht, wenn ein Bild fertig ist
+
+Mit [Onkel Bummel](https://github.com/Marcel-B/onkel-bummel) schickt der Dienst eine Nachricht, sobald ein Bild fertig ist, mit den Bildern als Anhang, und eine mit Priorität 4, wenn es fehlschlägt. Abgebrochene Bilder melden nichts.
+
+1. In Onkel Bummel unter Verwaltung → Publish-Tokens einen Token für das Topic `img-o-mat` anlegen.
+2. Im Container den Token ablegen: `umask 077; echo 'ob_…' > /etc/img-o-mat/onkel-bummel.token; chown imgomat /etc/img-o-mat/onkel-bummel.token`.
+3. In `/etc/img-o-mat/config.json` ergänzen und den Dienst neu starten (`systemctl restart img-o-mat`):
+   ```json
+   "onkelBummel": {"url": "https://onkel-bummel.<tailnet>.ts.net", "tokenFile": "/etc/img-o-mat/onkel-bummel.token",
+                   "topic": "img-o-mat", "click": "http://img-o-mat:1236/", "apps": null}
+   ```
+
+`apps` beschränkt die Nachrichten auf diese Apps (`null`: alle, zum Beispiel `["img-o-mat", "3d-o-mat"]`, dann meldet sich Tonwerk nicht). `click` ist die Adresse, die ein Tipp auf die Nachricht öffnet, und darf fehlen. Kommt Onkel Bummel nicht, versucht es der Dienst dreimal und schreibt es dann ins Log; die Warteschlange hält dafür nie an.
+
 ## Die Seite
 
 Reines HTML, CSS und JavaScript in einer Datei (`service/ui.html`), ohne Framework, Bibliotheken oder Web-Fonts. Oben stehen drei Bereiche (Malen, Modelle, LoRAs; die Adresse merkt sich, welcher offen ist) und ob der Mac, der malt, antwortet. Hell oder dunkel folgt dem System.
@@ -82,6 +96,7 @@ curl http://img-o-mat:1236/v1/images/generations -H 'content-type: application/j
 - `size` ist `BreitexHöhe`, je 256 bis 2048 und durch 16 teilbar. `n` geht von 1 bis 4, die Seeds werden hochgezählt.
 - `loras` (bis 3, nur mflux-Modelle) nennt LoRAs der Bibliothek beim `name` oder hochgeladene beim `file`. Eine LoRA passt nur zu ihrem Modell.
 - `references`: Bilder, die FLUX.2 Klein und FLUX 3 ansehen (bis 4, Rolle `style`, `figure` oder `place`). Wofür „image 1“, „image 2“ stehen, schreibt die App selbst in den Prompt. Z-Image und Krea 2 malen stattdessen über ein Startbild (`role: "start"`, `strength` 0.1 bis 0.9).
+- `"notify": false` schickt für dieses Bild keine Nachricht an Onkel Bummel (siehe unten).
 - `creator` (bis 60 Zeichen) steht im XMP-Vermerk. Ohne Angabe gilt der App-Name aus `Authorization: Bearer <app>` bzw. `X-Llm-App`.
 - Die Antwort ist OpenAIs `{"created", "data": [{"b64_json", "revised_prompt", "seed", …}]}`. `revised_prompt` ist bei FLUX 3 der Text, den sein Upsampler daraus gemacht hat.
 - Mit `"stream": true` kommen Server-Sent Events: `started` (`id`, `seed`), `queued` (`place`), `progress` (`stage`: `sending`, `loading`, `painting`, `checking`; `fraction`), `image` (je Bild, wie ein Eintrag von `data`), dann `done` oder `error`. Wer die Verbindung schließt, bricht das Bild ab.
@@ -109,6 +124,8 @@ Das Dashboard und das Ziel liegen im Monitoring-Stack (Tonwerk-AI, `deploy/monit
 Python 3.9 oder neuer, ohne Pakete. `python3 -m unittest discover tests` spielt den ganzen Weg gegen nachgestellte Maler (`tests/fake`) durch, lokal und über einen nachgestellten `ssh`, der wie der erzwungene Befehl arbeitet. Die echten Maler (`worker/paint.py`, `fetch.py`) brauchen einen Mac mit Apple Silicon.
 
 ## Was getestet ist
+
+Stand 2026-11-05: Die Nachricht an Onkel Bummel ist nur gegen einen nachgestellten Onkel Bummel in den Tests gelaufen, noch nicht gegen den echten.
 
 Stand 2026-11-05: `deploy/autodeploy.sh` läuft in den Tests gegen ein Wegwerf-Repository und einen nachgestellten Dienst (einmal je Commit, Warten beim Malen und Herunterladen, lokale Änderungen, scheiternde Tests und scheiterndes Ausrollen). launchd, die Mitteilungen und der echte Weg nach Proxmox sind auf oi-o-mat noch nicht gelaufen.
 

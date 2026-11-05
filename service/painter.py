@@ -78,11 +78,13 @@ class Job:
 
 
 class Painter:
-    def __init__(self, config, link, log, metrics=None):
+    def __init__(self, config, link, log, metrics=None, on_finish=None):
         self.config = config
         self.link = link
         self.log = log
         self.metrics = metrics
+        # Told about every job that ends (done, failed or cancelled), e.g. to send a message; must return at once.
+        self.on_finish = on_finish
         self.queue: list[Job] = []
         self.running: Job | None = None
         self.finished = deque(maxlen=20)
@@ -164,6 +166,11 @@ class Painter:
         with job._changed:
             job.done = True
             job._changed.notify_all()
+        if self.on_finish:
+            try:
+                self.on_finish(job)
+            except Exception as error:  # a message must never stop the queue
+                self.log(f"Nach dem Bild: {error!r}", "warning")
 
     def _paint(self, job: Job) -> None:
         count = int(job.request.get("n") or 1)
