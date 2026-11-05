@@ -96,6 +96,9 @@
   .loras .check { display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 14px; font-weight: 400; padding: 6px 8px; border-radius: 8px; margin: 0; cursor: pointer; }
   .loras .check:hover { background: var(--sunken); }
   .loras .check input { width: auto; accent-color: var(--accent); }
+  .loras .check > span { min-width: 0; }
+  /* Long names (LoRA files often carry model and version in the name) end in an ellipsis; the title shows them whole. */
+  .clip { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .queue div + div { margin-top: 4px; }
   .queue .now { font-weight: 550; }
@@ -136,7 +139,13 @@
   .list { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr)); }
   .item { display: flex; flex-direction: column; gap: 10px; }
   .item .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .item .top > div:first-child { flex: 1; min-width: 0; }
+  .item .top > button { flex: none; }
   .item .name { font-weight: 650; font-size: 15px; }
+  .item .sub { display: flex; white-space: nowrap; }
+  .item .sub > .size { flex: none; }
+  /* The source gives way first, so a short file name stays readable beside a long repository. */
+  .item .sub > .source { flex-shrink: 1000; }
   .facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: 13px; margin: 0; }
   .facts dt { color: var(--muted); }
   .facts dd { margin: 0; }
@@ -335,7 +344,7 @@ function renderPicks() {
   const picked = new Set([...document.querySelectorAll('#loraPicks input:checked')].map(i => i.value));
   $('loraPicks').hidden = !fitting.length;
   $('loraPicks').innerHTML = fitting.length
-    ? '<span class="label">LoRAs (bis zu 3)</span>' + fitting.map(l => `<label class="check"><input type="checkbox" value="${esc(l.name)}" ${picked.has(l.name) ? 'checked' : ''}><span>${esc(l.label)}${l.trigger ? `<small>${esc(l.trigger)}</small>` : ''}</span></label>`).join('')
+    ? '<span class="label">LoRAs (bis zu 3)</span>' + fitting.map(l => `<label class="check" title="${esc(l.label)}${l.trigger ? ' · ' + esc(l.trigger) : ''}"><input type="checkbox" value="${esc(l.name)}" ${picked.has(l.name) ? 'checked' : ''}><span><span class="clip">${esc(l.label)}</span>${l.trigger ? `<small class="clip">${esc(l.trigger)}</small>` : ''}</span></label>`).join('')
     : '';
 }
 
@@ -369,7 +378,7 @@ function renderLoras(list) {
   const shown = loras.filter(belongs);
   $('haveCount').textContent = shown.length;
   $('loras').innerHTML = shown.map(l => `<div class="card item" data-lora="${esc(l.name)}">
-    <div class="top"><div><div class="name">${esc(l.label)}</div><div class="muted small">${esc(l.name)} · ${(l.sizeBytes / 1e6).toFixed(0)} MB${l.source ? ' · ' + esc(l.source) : ''}</div></div>
+    <div class="top"><div><div class="name clip" title="${esc(l.label)}">${esc(l.label)}</div><div class="muted small sub"><span class="clip" title="${esc(l.name)}">${esc(l.name)}</span><span class="size">&nbsp;· ${(l.sizeBytes / 1e6).toFixed(0)} MB${l.source ? '&nbsp;·&nbsp;' : ''}</span>${l.source ? `<span class="clip source" title="${esc(l.source)}">${esc(l.source)}</span>` : ''}</div></div>
       <button class="quiet" data-delete="${esc(l.name)}">Löschen</button></div>
     <div class="lora-fields">
       <div class="wide"><label>Name</label><input value="${esc(l.label)}" data-field="label"></div>
@@ -384,7 +393,7 @@ function renderLoras(list) {
   $('suggestions').innerHTML = offers.map(s => {
     const busy = loraList.fetching.includes(s.name);
     return `<div class="card item">
-      <div class="top"><div><div class="name">${esc(s.label)}</div><div class="muted small">${esc(s.repo)}</div></div></div>
+      <div class="top"><div><div class="name clip" title="${esc(s.label)}">${esc(s.label)}</div><div class="muted small clip" title="${esc(s.repo)}">${esc(s.repo)}</div></div></div>
       <dl class="facts"><dt>Trigger</dt><dd>${esc(s.trigger || 'kein Trigger')}</dd>${s.license ? `<dt>Lizenz</dt><dd>${esc(s.license)}</dd>` : ''}</dl>
       <div class="foot"><div><button data-fetch="${esc(s.name)}" ${busy ? 'disabled' : ''}>${busy ? 'lädt …' : 'Laden'}</button></div></div></div>`;
   }).join('')
