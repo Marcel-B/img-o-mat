@@ -36,7 +36,7 @@
   nav.tabs a { color: var(--muted); text-decoration: none; padding: 5px 12px; border-radius: 7px; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
   nav.tabs a:hover { color: var(--text); }
   nav.tabs a[aria-current="page"] { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
-  nav.tabs .count { font-size: 11px; background: var(--line); color: var(--muted); border-radius: 99px; padding: 0 6px; }
+  nav.tabs .count { font-size: 11px; padding: 0 6px; }
   .status { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); min-width: 0; }
   .status .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); }
   .status.ok .dot { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -75,18 +75,27 @@
   .bar > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
 
   /* Paint view: the form stays beside the pictures on wide screens. */
-  .paint { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+  /* Narrow: prompt, settings, pictures. Wide: settings on the left, prompt above the pictures on the right; the
+     settings column scrolls on its own so all of it stays reachable. */
+  .paint { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); grid-template-areas: "prompt" "side" "gallery"; align-items: start; }
+  .paint .promptbar { grid-area: prompt; }
+  .paint .side { grid-area: side; }
+  .paint .gallery { grid-area: gallery; }
   @media (min-width: 960px) {
-    .paint { grid-template-columns: 22rem minmax(0, 1fr); }
-    .paint .side { position: sticky; top: 72px; }
+    .paint { grid-template-columns: 20rem minmax(0, 1fr); grid-template-rows: auto 1fr; grid-template-areas: "side prompt" "side gallery"; }
+    .paint .side { position: sticky; top: 72px; align-self: start; max-height: calc(100vh - 88px); overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius); }
   }
+  .promptbar textarea { min-height: 96px; }
+  .promptfoot { margin-top: 10px; gap: 10px 12px; }
+  .promptfoot #paint { padding: 9px 22px; font-size: 15px; }
+  .promptfoot .progress { flex: 1; min-width: 8rem; display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+  .promptfoot .hint { margin: 0; }
+  .loras .check { align-items: flex-start; }
+  .loras .check input { margin-top: 3px; }
+  .loras .check small { display: block; color: var(--muted); font-size: 12px; }
   .loras .check { display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 14px; font-weight: 400; padding: 6px 8px; border-radius: 8px; margin: 0; cursor: pointer; }
   .loras .check:hover { background: var(--sunken); }
   .loras .check input { width: auto; accent-color: var(--accent); }
-  .paintbox { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
-  .paintbox #paint { flex: 1; padding: 10px 14px; font-size: 15px; }
-  #paintState { font-size: 13px; margin-top: 8px; min-height: 1.2em; }
-  #paintBar { margin-top: 8px; }
 
   .queue div + div { margin-top: 4px; }
   .queue .now { font-weight: 550; }
@@ -141,7 +150,14 @@
   .upload input { height: 42px; }
   .upload input[type="file"] { padding: 8px; font-size: 14px; }
   .upload button { height: 42px; }
-  .suggest { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .chips button { border-radius: 99px; padding: 5px 14px; }
+  .chips button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .chips button .count { margin-left: 2px; }
+  .count { font-size: 12px; background: var(--line); color: var(--muted); border-radius: 99px; padding: 0 7px; }
+  .chips button[aria-pressed="true"] .count { background: rgba(255, 255, 255, .25); color: inherit; }
+  .group-head { display: flex; align-items: center; gap: 8px; margin: 22px 0 10px; }
+  .list .note { grid-column: 1 / -1; padding: 22px 20px; }
 </style>
 </head>
 <body>
@@ -159,11 +175,21 @@
 
 <main>
   <section id="view-malen" class="paint" data-view-panel="malen">
+    <div class="card promptbar">
+      <label for="prompt">Prompt</label>
+      <textarea id="prompt" maxlength="2000" placeholder="a red fox in fresh snow, morning light, 35 mm photo"></textarea>
+      <div class="row promptfoot">
+        <button class="primary" id="paint">Malen</button>
+        <button id="cancel" hidden>Abbrechen</button>
+        <div class="progress">
+          <div id="paintState" class="muted"></div>
+          <div class="bar" id="paintBar" hidden><div></div></div>
+        </div>
+        <span class="hint">Englisch malt am besten · <kbd>⌘</kbd>/<kbd>Strg</kbd> + <kbd>Enter</kbd></span>
+      </div>
+    </div>
     <div class="side">
       <div class="card">
-        <div class="field"><label for="prompt">Prompt</label>
-          <textarea id="prompt" maxlength="2000" placeholder="a red fox in fresh snow, morning light, 35 mm photo"></textarea>
-          <div class="hint">Englisch malt am besten. <kbd>⌘</kbd>/<kbd>Strg</kbd> + <kbd>Enter</kbd> malt.</div></div>
         <div class="field"><label for="model">Modell</label><select id="model"></select></div>
         <div class="field pair">
           <div><label for="size">Größe</label>
@@ -179,21 +205,13 @@
         </div>
         <div class="field"><label for="seed">Seed</label><input id="seed" inputmode="numeric" placeholder="zufällig"></div>
         <div class="field loras" id="loraPicks" hidden></div>
-        <div class="paintbox">
-          <div class="row">
-            <button class="primary" id="paint">Malen</button>
-            <button id="cancel" hidden>Abbrechen</button>
-          </div>
-          <div class="bar" id="paintBar" hidden><div></div></div>
-          <div id="paintState" class="muted"></div>
-        </div>
       </div>
       <div class="card">
         <div class="card-head"><h2>Warteschlange</h2></div>
         <div id="queue" class="queue muted small">…</div>
       </div>
     </div>
-    <div>
+    <div class="gallery">
       <div class="pictures" id="pictures"></div>
       <div class="empty" id="picturesEmpty"><b>Noch keine Bilder</b>Was du hier malst, bleibt nur auf dieser Seite, bis du sie neu lädst.</div>
     </div>
@@ -209,19 +227,23 @@
 
   <section id="view-loras" data-view-panel="loras" hidden>
     <div class="view-head">
-      <div><h1>LoRAs</h1><p>Änderungen an Name, Modell, Trigger und Stärke werden sofort gespeichert.</p></div>
+      <div><h1>LoRAs</h1><p>Wähle ein Modell: oben die LoRAs auf der Platte, darunter die, die du laden kannst. Änderungen werden sofort gespeichert.</p></div>
     </div>
-    <div class="card">
-      <div class="card-head"><h2>Hochladen</h2></div>
+    <nav class="chips" id="loraModels" aria-label="Modell"></nav>
+    <div class="group-head"><h2>Auf der Platte</h2><span class="count" id="haveCount"></span></div>
+    <div class="list" id="loras"></div>
+    <div class="group-head"><h2>Zum Laden</h2><span class="count" id="offerCount"></span></div>
+    <div class="list" id="suggestions"></div>
+    <div class="card" style="margin-top:14px">
+      <div class="card-head"><h2>Eigene Datei hochladen</h2></div>
       <div class="upload">
         <div><label for="loraFile">Datei (.safetensors)</label><input type="file" id="loraFile" accept=".safetensors"></div>
         <div><label for="loraName">Name</label><input id="loraName" placeholder="z. B. aquarell"></div>
         <button id="loraUpload" class="primary">Hochladen</button>
       </div>
+      <div class="hint">Das Modell erkennt der Dienst meist aus der Datei, sonst gilt das oben gewählte.</div>
       <div id="loraState" class="muted small" style="margin-top:8px"></div>
-      <div id="suggestions"></div>
     </div>
-    <div class="list" id="loras" style="margin-top:14px"></div>
   </section>
 </main>
 
@@ -313,16 +335,40 @@ function renderPicks() {
   const picked = new Set([...document.querySelectorAll('#loraPicks input:checked')].map(i => i.value));
   $('loraPicks').hidden = !fitting.length;
   $('loraPicks').innerHTML = fitting.length
-    ? '<span class="label">LoRAs (bis zu 3)</span>' + fitting.map(l => `<label class="check"><input type="checkbox" value="${esc(l.name)}" ${picked.has(l.name) ? 'checked' : ''}>${esc(l.label)}${l.trigger ? ` <span class="muted small">${esc(l.trigger)}</span>` : ''}</label>`).join('')
+    ? '<span class="label">LoRAs (bis zu 3)</span>' + fitting.map(l => `<label class="check"><input type="checkbox" value="${esc(l.name)}" ${picked.has(l.name) ? 'checked' : ''}><span>${esc(l.label)}${l.trigger ? `<small>${esc(l.trigger)}</small>` : ''}</span></label>`).join('')
     : '';
 }
 
+// The LoRA view shows one model at a time: what is on the disk for it and what could be fetched for it.
+let loraList = { loras: [], suggestions: [], fetching: [] };
+let loraModel = null;
+try { loraModel = localStorage.getItem('img-o-mat.loraModel'); } catch {}
+
+function loraModels() {
+  const ids = models.filter(m => m.loras).map(m => ({ id: m.id, label: m.label }));
+  // LoRAs whose model the service could not tell from the file still need a place to be found and fixed.
+  if (loraList.loras.some(l => !l.model || !models.some(m => m.id === l.model))) ids.push({ id: '', label: 'Modell unbekannt' });
+  return ids;
+}
+
 function renderLoras(list) {
-  loras = list.loras;
+  if (list) { loraList = list; loras = list.loras; }
   $('loraCount').hidden = !loras.length;
   $('loraCount').textContent = loras.length;
+  const choices = loraModels();
+  if (!choices.some(c => c.id === loraModel)) {
+    const painting = models.find(m => m.id === $('model').value && m.loras);
+    loraModel = painting ? painting.id : (choices[0]?.id ?? null);
+  }
+  const known = id => models.some(m => m.id === id);
+  const belongs = l => loraModel === '' ? !l.model || !known(l.model) : l.model === loraModel;
+  const have = id => loras.filter(l => id === '' ? !l.model || !known(l.model) : l.model === id).length;
+  $('loraModels').innerHTML = choices.map(c => `<button data-lora-model="${esc(c.id)}" aria-pressed="${c.id === loraModel}">${esc(c.label)} <span class="count">${have(c.id)}</span></button>`).join('');
+
   const options = id => '<option value="">unbekannt</option>' + models.filter(m => m.loras).map(m => `<option value="${esc(m.id)}" ${m.id === id ? 'selected' : ''}>${esc(m.label)}</option>`).join('');
-  $('loras').innerHTML = loras.map(l => `<div class="card item" data-lora="${esc(l.name)}">
+  const shown = loras.filter(belongs);
+  $('haveCount').textContent = shown.length;
+  $('loras').innerHTML = shown.map(l => `<div class="card item" data-lora="${esc(l.name)}">
     <div class="top"><div><div class="name">${esc(l.label)}</div><div class="muted small">${esc(l.name)} · ${(l.sizeBytes / 1e6).toFixed(0)} MB${l.source ? ' · ' + esc(l.source) : ''}</div></div>
       <button class="quiet" data-delete="${esc(l.name)}">Löschen</button></div>
     <div class="lora-fields">
@@ -331,11 +377,18 @@ function renderLoras(list) {
       <div><label>Trigger</label><input value="${esc(l.trigger ?? '')}" data-field="trigger" placeholder="kein Trigger"></div>
       <div><label>Stärke</label><input value="${l.strength}" data-field="strength" inputmode="decimal"></div>
     </div></div>`).join('')
-    || '<div class="empty"><b>Noch keine LoRAs</b>Lade oben eine Datei hoch.</div>';
-  $('suggestions').innerHTML = list.suggestions.length
-    ? '<div class="paintbox"><span class="label">Krea-2-Stil-LoRAs von Hugging Face holen</span><div class="suggest">' + list.suggestions.map(s =>
-        `<button data-fetch="${esc(s.name)}" ${list.fetching.includes(s.name) ? 'disabled' : ''}>${esc(s.label)}${list.fetching.includes(s.name) ? ' …' : ''}</button>`).join('') + '</div></div>'
-    : '';
+    || `<div class="empty note">${loraModel === null ? 'Kein Modell nimmt LoRAs.' : 'Für dieses Modell liegt noch keine LoRA auf der Platte.'}</div>`;
+
+  const offers = loraModel ? loraList.suggestions.filter(s => s.model === loraModel) : [];
+  $('offerCount').textContent = offers.length;
+  $('suggestions').innerHTML = offers.map(s => {
+    const busy = loraList.fetching.includes(s.name);
+    return `<div class="card item">
+      <div class="top"><div><div class="name">${esc(s.label)}</div><div class="muted small">${esc(s.repo)}</div></div></div>
+      <dl class="facts"><dt>Trigger</dt><dd>${esc(s.trigger || 'kein Trigger')}</dd>${s.license ? `<dt>Lizenz</dt><dd>${esc(s.license)}</dd>` : ''}</dl>
+      <div class="foot"><div><button data-fetch="${esc(s.name)}" ${busy ? 'disabled' : ''}>${busy ? 'lädt …' : 'Laden'}</button></div></div></div>`;
+  }).join('')
+    || `<div class="empty note">${loraList.suggestions.length || loraModel ? 'Für dieses Modell gibt es keine offiziellen LoRAs zum Laden. Eigene Dateien kannst du unten hochladen.' : 'Nichts zum Laden.'}</div>`;
   renderPicks();
 }
 
@@ -374,6 +427,8 @@ async function poll() {
       models = (await api('/v1/models')).data;
       renderModels();
     }
+    // Fetching a LoRA runs in the background; keep asking until it is on the disk.
+    if (loraList.fetching.length) renderLoras(await api('/v1/loras'));
   } catch { /* the next round tries again */ }
 }
 
@@ -519,7 +574,11 @@ document.addEventListener('click', async event => {
   const target = event.target.closest('button');
   if (!target) return;
   try {
-    if (target.dataset.download) {
+    if (target.dataset.loraModel !== undefined) {
+      loraModel = target.dataset.loraModel;
+      try { localStorage.setItem('img-o-mat.loraModel', loraModel); } catch {}
+      renderLoras();
+    } else if (target.dataset.download) {
       target.disabled = true;
       await api(`/v1/models/${target.dataset.download}/download`, { method: 'POST' });
       await load(true);
@@ -528,7 +587,7 @@ document.addEventListener('click', async event => {
       await api(`/v1/loras/${encodeURIComponent(target.dataset.delete)}`, { method: 'DELETE' });
       renderLoras(await api('/v1/loras'));
     } else if (target.dataset.fetch) {
-      target.disabled = true; target.textContent += ' …';
+      target.disabled = true; target.textContent = 'lädt …';
       await api('/v1/loras/fetch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: target.dataset.fetch }) });
       renderLoras(await api('/v1/loras'));
     }
@@ -566,7 +625,10 @@ $('loraUpload').addEventListener('click', async () => {
   if (!file || !name) { $('loraState').textContent = 'Datei und Name wählen.'; return; }
   $('loraState').textContent = 'lädt hoch …';
   try {
-    await api(`/v1/loras/${encodeURIComponent(name)}`, { method: 'PUT', body: file });
+    const saved = await api(`/v1/loras/${encodeURIComponent(name)}`, { method: 'PUT', body: file });
+    if (!saved.model && loraModel) {
+      await api(`/v1/loras/${encodeURIComponent(name)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: loraModel }) });
+    }
     $('loraState').textContent = 'gespeichert';
     $('loraFile').value = ''; $('loraName').value = '';
     renderLoras(await api('/v1/loras'));

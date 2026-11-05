@@ -64,10 +64,10 @@ Mit [Onkel Bummel](https://github.com/Marcel-B/onkel-bummel) schickt der Dienst 
 
 Reines HTML, CSS und JavaScript in einer Datei (`service/ui.html`), ohne Framework, Bibliotheken oder Web-Fonts. Oben stehen drei Bereiche (Malen, Modelle, LoRAs; die Adresse merkt sich, welcher offen ist) und ob der Mac, der malt, antwortet. Hell oder dunkel folgt dem System.
 
-- **Malen:** Modell, Größe, Anzahl, Seed, Prompt und die LoRAs, die zum Modell passen. Fortschritt und die Ergebnisse; solange gemalt wird, hält ein Platzhalter in der gewählten Größe die Stelle frei. Strg/⌘ + Enter im Prompt malt. Der Knopf oben rechts am Bild (oder ein Klick aufs Bild) öffnet eine große Vorschau mit Herunterladen und Löschen; die Pfeiltasten blättern. Die Bilder liegen nur auf der Seite: Wer neu lädt oder löscht, hat sie nicht mehr, der Dienst behält keine. Englisch malt am besten. Tonwerk übersetzt für seine Cover vorher mit Claude, die Seite tut das nicht.
+- **Malen:** Links Modell, Größe, Anzahl, Seed, die LoRAs, die zum Modell passen, und die Warteschlange; rechts der Prompt über den Bildern, darunter Fortschritt und die Ergebnisse; solange gemalt wird, hält ein Platzhalter in der gewählten Größe die Stelle frei. Strg/⌘ + Enter im Prompt malt. Der Knopf oben rechts am Bild (oder ein Klick aufs Bild) öffnet eine große Vorschau mit Herunterladen und Löschen; die Pfeiltasten blättern. Die Bilder liegen nur auf der Seite: Wer neu lädt oder löscht, hat sie nicht mehr, der Dienst behält keine. Englisch malt am besten. Tonwerk übersetzt für seine Cover vorher mit Claude, die Seite tut das nicht.
 - **Warteschlange:** Was gerade malt und wer wartet, auch Anfragen anderer Apps.
 - **Modelle:** Lizenz, ob kommerziell nutzbar, Speicher, ob heruntergeladen, und ein Knopf zum Herunterladen (15 bis 35 GB auf die T7; er prüft vorher den Platz). Nie von selbst.
-- **LoRAs:** Hochladen, Name, Modell, Trigger und Stärke ändern, löschen, Krea-2-Stil-LoRAs von Hugging Face holen. Das Modell erkennt der Dienst meist aus der Datei.
+- **LoRAs:** Oben wählst du ein Modell. Darunter stehen die LoRAs, die für dieses Modell schon auf der Platte liegen (Name, Modell, Trigger und Stärke ändern, löschen), und die, die du von Hugging Face laden kannst (bisher nur Krea 2 Turbo, Krea hat für die anderen Modelle keine offiziellen). Eigene Dateien lädst du unten hoch; das Modell erkennt der Dienst meist aus der Datei, sonst gilt das oben gewählte.
 
 ## Schnittstelle
 
