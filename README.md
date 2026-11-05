@@ -32,6 +32,18 @@ Die Bildmodelle von oi-o-mat als Dienst für alle Apps: FLUX.2 Klein 4B und 9B, 
 
 Der Hugging-Face-Token für Klein 9B und Krea 2 liegt wie bisher in `~/.config/tonwerk/huggingface.token`. Auf oi-o-mat lädt er die Modelle, im Container holt er LoRAs.
 
+### Automatisch ausrollen
+
+Auf oi-o-mat, im selben Checkout (auf `main`, ohne lokale Änderungen):
+```sh
+deploy/autodeploy.sh --install
+```
+Ab dann schaut launchd alle fünf Minuten nach, ob `origin/main` neu ist. Wenn ja, wartet es, bis nichts malt, in der Warteschlange steht oder herunterlädt (ein Neustart des Dienstes bräche das ab), spult den Checkout vor, lässt die Tests mit `/usr/bin/python3` laufen und ruft dann `deploy/to-proxmox.sh` auf. Das ruft seinerseits `install-worker.sh` auf, also kommen geänderte Worker-Skripte und neue Runner-Pins mit. Einstellungen für `to-proxmox.sh` (`PROXMOX`, `WORKER`, `LOKI_URL`, …) stehen als `NAME=wert`-Zeilen in `~/.config/img-o-mat/autodeploy.env`.
+
+- Scheitern die Tests, bleibt dieser Stand liegen, bis ein neuer Commit kommt. Scheitert das Ausrollen (Proxmox aus, Tailscale weg), versucht es die nächste Runde wieder. Beides meldet eine Mitteilung auf dem Mac, einmal je Commit.
+- `deploy/autodeploy.sh --status` zeigt, was zuletzt ausgerollt wurde, und das Ende des Logs (`~/Library/Logs/img-o-mat/autodeploy.log`). `--uninstall` schaltet es ab.
+- Es läuft als dein Benutzer: `git fetch` und `ssh proxmox` müssen ohne Nachfrage gehen (Schlüssel im Schlüsselbund oder ohne Passphrase, Git-Zugang über den Schlüsselbund).
+
 Ohne Proxmox kann der Dienst auch auf einem Mac laufen (`python3 service/server.py`, Einstellungen in `~/.config/img-o-mat/config.json`, `"worker": {"ssh": "marcel@oi-o-mat"}`). Ohne `worker` malt er auf dem eigenen Mac.
 
 ## Die Seite
@@ -95,6 +107,8 @@ Das Dashboard und das Ziel liegen im Monitoring-Stack (Tonwerk-AI, `deploy/monit
 Python 3.9 oder neuer, ohne Pakete. `python3 -m unittest discover tests` spielt den ganzen Weg gegen nachgestellte Maler (`tests/fake`) durch, lokal und über einen nachgestellten `ssh`, der wie der erzwungene Befehl arbeitet. Die echten Maler (`worker/paint.py`, `fetch.py`) brauchen einen Mac mit Apple Silicon.
 
 ## Was getestet ist
+
+Stand 2026-11-05: `deploy/autodeploy.sh` läuft in den Tests gegen ein Wegwerf-Repository und einen nachgestellten Dienst (einmal je Commit, Warten beim Malen und Herunterladen, lokale Änderungen, scheiternde Tests und scheiterndes Ausrollen). launchd, die Mitteilungen und der echte Weg nach Proxmox sind auf oi-o-mat noch nicht gelaufen.
 
 Stand 2026-10-30: `/metrics` und der Versand an Loki laufen gegen die nachgestellten Maler und einen kleinen nachgestellten Loki. Die Ausgabe besteht `promtool check metrics`, und die Tests laufen mit Python 3.9 und 3.13. Im Proxmox-Container ist das noch nicht gelaufen.
 
