@@ -6,13 +6,13 @@
 #
 #   deploy/to-proxmox.sh            set up or update
 #
-# Settings through the environment: PROXMOX (ssh name of the Proxmox host, "proxmox"), WORKER (how the container
+# Settings through the environment: PROXMOX (ssh name of the Proxmox host, "nuc"), WORKER (how the container
 # reaches this Mac, $USER@<this Mac's name>), plus those of proxmox-lxc.sh (TS_AUTHKEY, CTID, LOKI_URL, ...).
 # install-worker.sh must have run here once (the environments take a while; it is not repeated here).
 set -eu
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-PROXMOX="${PROXMOX:-proxmox}"
+PROXMOX="${PROXMOX:-nuc}"
 WORKER="${WORKER:-$(id -un)@$(scutil --get LocalHostName 2>/dev/null | tr '[:upper:]' '[:lower:]' || hostname -s)}"
 TOKEN="$HOME/.config/tonwerk/huggingface.token"
 [ -f "$HOME/.config/img-o-mat/huggingface.token" ] && TOKEN="$HOME/.config/img-o-mat/huggingface.token"
