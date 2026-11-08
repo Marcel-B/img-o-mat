@@ -115,6 +115,20 @@
   .refs .about { flex: 1; min-width: 12rem; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; }
   .refs .about label { margin: 0; display: flex; justify-content: space-between; gap: 8px; }
   .refs input[type="range"] { padding: 0; border: 0; background: none; box-shadow: none; accent-color: var(--accent); }
+  .prompthead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+  .prompthead label { margin: 0; }
+  .prompthead button { font-size: 12.5px; padding: 3px 9px; }
+  /* The prompt, large: the same textarea moves into this dialog and back, so its text, undo history, pasting
+     pictures and ⌘/Strg + Enter stay as they are. On a phone it fills the screen. */
+  dialog.promptedit { width: min(56rem, calc(100vw - 32px)); height: min(40rem, calc(100vh - 32px)); height: min(40rem, calc(100dvh - 32px)); max-width: none; max-height: none; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--text); box-shadow: 0 12px 40px rgba(0, 0, 0, .25); }
+  dialog.promptedit[open] { display: flex; flex-direction: column; gap: 10px; }
+  dialog.promptedit::backdrop { background: rgba(0, 0, 0, .45); }
+  dialog.promptedit .prompthead { margin: 0; }
+  dialog.promptedit .prompthead label { font-size: 15px; color: var(--text); }
+  dialog.promptedit textarea { flex: 1; min-height: 0; resize: none; line-height: 1.55; }
+  dialog.promptedit .row { justify-content: flex-end; gap: 10px; }
+  dialog.promptedit .row .hint { margin: 0 auto 0 0; }
+  @media (max-width: 640px) { dialog.promptedit { width: 100vw; height: 100vh; height: 100dvh; border: 0; border-radius: 0; padding: 12px; } dialog.promptedit .keys { display: none; } }
   .promptbar.dropping { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .loras .check { align-items: flex-start; }
   .loras .check input { margin-top: 3px; }
@@ -225,7 +239,10 @@
 <main>
   <section id="view-malen" class="paint" data-view-panel="malen">
     <div class="card promptbar">
-      <label for="prompt">Prompt</label>
+      <div class="prompthead">
+        <label for="prompt">Prompt</label>
+        <button id="promptBig" title="Den Prompt groß lesen und bearbeiten">⤢ Groß</button>
+      </div>
       <div class="refs" id="refs" hidden>
         <div class="list-row" id="refList"></div>
         <div class="about">
@@ -332,6 +349,18 @@
     <button id="previewReuse" title="Prompt, Modell, Größe, Seed, LoRAs und Vorlagen in die Malen-Felder übernehmen">Übernehmen</button>
     <button class="remove" id="previewDelete">Löschen</button>
     <button id="previewClose">Schließen</button>
+  </div>
+</dialog>
+<dialog class="promptedit" id="promptDialog" aria-label="Prompt bearbeiten">
+  <div class="prompthead">
+    <label for="prompt">Prompt</label>
+    <button id="promptSmall" title="Zurück ins kleine Feld (Esc)">⤡ Klein</button>
+  </div>
+  <div id="promptSlot" hidden></div>
+  <div class="row">
+    <span class="hint"><span id="promptCount">0</span> / 2000 Zeichen<span class="keys"> · <kbd>⌘</kbd>/<kbd>Strg</kbd> + <kbd>Enter</kbd> malt</span></span>
+    <button id="promptDone">Fertig</button>
+    <button class="primary" id="promptPaint">Malen</button>
   </div>
 </dialog>
 <script>
@@ -1073,8 +1102,28 @@ promptbar.addEventListener('drop', event => {
 });
 $('paint').addEventListener('click', paint);
 $('prompt').addEventListener('keydown', event => {
-  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); paint(); }
+  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); $('promptDialog').close(); paint(); }
 });
+// The large prompt: the textarea itself moves into the dialog and back on every way out (Esc included).
+const promptHome = $('refs');
+function promptCount() { $('promptCount').textContent = $('prompt').value.length; }
+$('promptBig').addEventListener('click', () => {
+  const field = $('prompt'), at = field.selectionStart, end = field.selectionEnd;
+  $('promptSlot').after(field);
+  promptCount();
+  $('promptDialog').showModal();
+  field.focus();
+  field.setSelectionRange(at, end);
+});
+$('promptDialog').addEventListener('close', () => {
+  const field = $('prompt');
+  promptHome.after(field);
+  field.focus({ preventScroll: true });
+});
+$('prompt').addEventListener('input', promptCount);
+$('promptSmall').addEventListener('click', () => $('promptDialog').close());
+$('promptDone').addEventListener('click', () => $('promptDialog').close());
+$('promptPaint').addEventListener('click', () => { $('promptDialog').close(); paint(); });
 $('cancel').addEventListener('click', () => current && api(`/v1/jobs/${current}`, { method: 'DELETE' }).catch(() => {}));
 $('refresh').addEventListener('click', () => load(true));
 $('loraFile').addEventListener('change', () => {
