@@ -56,6 +56,18 @@ class Files:
                 length -= len(stream.read(min(CHUNK, length)) or b"") or length
             os.utime(os.path.join(self.folder, digest))
             return False
+        return self._write(stream, length, digest)[1]
+
+    def store_named_by_content(self, stream, length: int, limit: int = MAX_BYTES) -> tuple[str, bool]:
+        """Writes the upload and names it by its hash, for clients that cannot hash it themselves: the page, whose
+        browser offers SHA-256 only on HTTPS or localhost. The hash and whether the file is new."""
+        if length > limit:
+            raise FileError(413, "Die Datei ist zu groß.")
+        if length <= 0:
+            raise FileError(400, "Die Datei ist leer.")
+        return self._write(stream, length, None)
+
+    def _write(self, stream, length: int, expected: str | None) -> tuple[str, bool]:
         hasher = hashlib.sha256()
         handle, temporary = tempfile.mkstemp(dir=self.folder, prefix=".upload-")
         try:
@@ -68,10 +80,13 @@ class Files:
                     hasher.update(chunk)
                     out.write(chunk)
                     left -= len(chunk)
-            if hasher.hexdigest() != digest:
+            digest = hasher.hexdigest()
+            if expected is not None and digest != expected:
                 raise FileError(400, "Der SHA-256 passt nicht zum Inhalt.")
-            os.replace(temporary, os.path.join(self.folder, digest))
-            return True
+            target = os.path.join(self.folder, digest)
+            created = not os.path.exists(target)
+            os.replace(temporary, target)
+            return digest, created
         finally:
             if os.path.exists(temporary):
                 os.remove(temporary)

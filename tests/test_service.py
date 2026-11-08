@@ -231,6 +231,25 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("keine Referenzbilder", body["error"]["message"])
 
+    def test_the_page_uploads_pictures_by_content(self):
+        content = b"\xff\xd8 picture from the page"
+        digest = hashlib.sha256(content).hexdigest()
+        status, body, _ = self.call("POST", "/v1/files", raw=content, headers={"content-type": "image/jpeg"})
+        self.assertEqual((status, body), (201, {"sha256": digest}))
+        status, body, _ = self.call("POST", "/v1/files", raw=content, headers={"content-type": "image/jpeg"})
+        self.assertEqual((status, body), (200, {"sha256": digest}))
+        self.assertEqual(self.call("HEAD", f"/v1/files/{digest}")[0], 200)
+        self.assertEqual(self.call("POST", "/v1/files", raw=b"")[0], 400)
+        status, body, _ = self.paint(references=[{"file": digest}])
+        self.assertEqual(status, 200, body)
+        self.assertEqual(self.last_request()["references"], [{"file": digest, "role": "style", "strength": None}])
+
+    def test_the_page_offers_pictures_to_look_at_and_paint_over(self):
+        _, page, _ = self.call("GET", "/")
+        page = page.decode()
+        for part in ('id="refAdd"', 'id="refFile"', 'id="refStrength"', 'id="previewRef"', "'/v1/files'", "role: 'start'"):
+            self.assertIn(part, page)
+
     def test_loras_from_the_library(self):
         # FLUX.2's fused single-block layer, 3072 wide: Klein 4B.
         content = safetensors({"single_blocks.0.to_qkv_mlp_proj.lora_A.weight": {"dtype": "F16", "shape": [16, 3072], "data_offsets": [0, 16]},

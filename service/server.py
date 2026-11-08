@@ -13,6 +13,7 @@ The API, OpenAI's images API where it has one (README, "Schnittstelle"):
     POST   /v1/images/generations           paint; "stream": true for progress as server-sent events
     DELETE /v1/jobs/<id>                    cancel a picture
     HEAD   /v1/files/<sha256>, PUT ...      reference pictures (and LoRAs not in the library), once per file
+    POST   /v1/files                        the same, named by the service (the page's reference pictures)
     GET    /v1/loras, PUT/PATCH/DELETE /v1/loras/<name>, POST /v1/loras/fetch
     GET    /v1/gallery, POST ..., GET/DELETE /v1/gallery/<name>   pictures kept on the T7 (the page's Speichern)
     GET    /status                          what runs and waits, the worker, the downloads
@@ -54,6 +55,8 @@ MAX_PROMPT = 2000
 MAX_N = 4
 # A 2048 x 2048 JPEG at quality 92 is a few MB; base64 makes it a third more.
 MAX_GALLERY_BODY = 24 << 20
+# A reference picture the page sends; it shrinks them to about a megapixel first, a photo straight off a phone fits too.
+MAX_PICTURE_BYTES = 32 << 20
 ROLES = ("style", "figure", "place", "start")
 UI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui.html")
 # Tonwerk-AI waits for a cover it asked for; other apps through the gate come after it.
@@ -73,7 +76,8 @@ ROUTES = (
     ("/v1/jobs/<id>", re.compile(r"/v1/jobs/[^/]+")),
     ("/v1/gallery/<name>", re.compile(r"/v1/gallery/[^/]+")),
 )
-KNOWN_ROUTES = {"/", "/v1/models", "/v1/images/generations", "/v1/busy", "/v1/loras", "/v1/gallery", "/status", "/metrics"}
+KNOWN_ROUTES = {"/", "/v1/models", "/v1/images/generations", "/v1/busy", "/v1/files", "/v1/loras", "/v1/gallery", "/status",
+                "/metrics"}
 
 shipper: LokiShipper | None = None
 
@@ -479,6 +483,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/v1/gallery":
             saved = service.keep(self.read_json(MAX_GALLERY_BODY), self.app())
             self.send_json(201 if saved["created"] else 200, saved)
+            return
+        if path == "/v1/files":
+            digest, created = service.files.store_named_by_content(self.rfile, int(self.headers.get("Content-Length") or 0),
+                                                                   MAX_PICTURE_BYTES)
+            self.send_json(201 if created else 200, {"sha256": digest})
             return
         match = re.fullmatch(r"/v1/models/([^/]+)/download", path)
         if match:
