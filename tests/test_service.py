@@ -283,7 +283,7 @@ class ServiceTest(unittest.TestCase):
         _, page, _ = self.call("GET", "/")
         page = page.decode()
         for part in ('id="refAdd"', 'id="refFile"', 'id="refStrength"', 'id="previewRef"', 'id="previewReuse"', "'/v1/files'",
-                     "role: 'start'", "/v1/gallery/ref/"):
+                     "role: 'start'", "/v1/gallery/ref/", 'id="previewRefine"'):
             self.assertIn(part, page)
 
     def test_loras_from_the_library(self):
