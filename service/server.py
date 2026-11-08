@@ -16,6 +16,7 @@ The API, OpenAI's images API where it has one (README, "Schnittstelle"):
     POST   /v1/files                        the same, named by the service (the page's reference pictures)
     GET    /v1/loras, PUT/PATCH/DELETE /v1/loras/<name>, POST /v1/loras/fetch
     GET    /v1/gallery, POST ..., GET/DELETE /v1/gallery/<name>   pictures kept on the T7 (the page's Speichern)
+    GET    /v1/gallery/ref/<sha256>         a picture a kept one was painted from
     GET    /status                          what runs and waits, the worker, the downloads
     GET    /metrics                         numbers for Prometheus (metrics.py), no login, nothing but numbers
     GET    /                                the page
@@ -74,6 +75,7 @@ ROUTES = (
     ("/v1/loras/fetch", re.compile(r"/v1/loras/fetch")),
     ("/v1/loras/<name>", re.compile(r"/v1/loras/[^/]+")),
     ("/v1/jobs/<id>", re.compile(r"/v1/jobs/[^/]+")),
+    ("/v1/gallery/ref/<sha256>", re.compile(r"/v1/gallery/ref/[^/]+")),
     ("/v1/gallery/<name>", re.compile(r"/v1/gallery/[^/]+")),
 )
 KNOWN_ROUTES = {"/", "/v1/models", "/v1/images/generations", "/v1/busy", "/v1/files", "/v1/loras", "/v1/gallery", "/status",
@@ -282,10 +284,23 @@ class Service:
             raise RequestError(400, "b64_json fehlt.")
         seed = body.get("seed")
         meta = {
-            "model": body.get("model"), "prompt": body.get("prompt"), "size": body.get("size"),
-            "seed": seed if isinstance(seed, int) else None, "app": app, "creator": body.get("creator"),
+            "model": body.get("model"), "prompt": body.get("prompt"), "paintedPrompt": body.get("paintedPrompt"),
+            "size": body.get("size"), "seed": seed if isinstance(seed, int) else None, "app": app,
+            "creator": body.get("creator"), "loras": body.get("loras"),
         }
-        return self.gallery.save(picture, meta)
+        # The pictures it was painted from go along from the service's own copies (uploaded by hash for the painting),
+        # so the page need not send them again; one pruned meanwhile is still named, without its picture.
+        references = []
+        for given in (body.get("references") or [])[:4]:
+            if not isinstance(given, dict):
+                continue
+            entry = {"role": given.get("role"), "strength": given.get("strength")}
+            path = self.files.path(str(given.get("file") or ""))
+            if path:
+                with open(path, "rb") as file:
+                    entry["jpeg"] = base64.b64encode(file.read()).decode("ascii")
+            references.append(entry)
+        return self.gallery.save(picture, meta, references)
 
     def files_use(self, digest: str) -> str:
         try:
@@ -453,7 +468,11 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/v1/gallery":
             self.send_json(200, service.gallery.list())
         elif path.startswith("/v1/gallery/"):
-            body = service.gallery.picture(path[len("/v1/gallery/"):], query.get("thumb") == "1")
+            name = path[len("/v1/gallery/"):]
+            if name.startswith("ref/"):
+                body = service.gallery.reference(name[len("ref/"):])
+            else:
+                body = service.gallery.picture(name, query.get("thumb") == "1")
             self.send_response(200)
             self.send_header("Content-Type", "image/jpeg")
             self.send_header("Content-Length", str(len(body)))

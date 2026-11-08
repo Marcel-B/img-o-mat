@@ -4,7 +4,7 @@
     launch.py fetch           a model's download, with mflux's Python
     launch.py probe           what this Mac has
     launch.py receive <sha>   a file on stdin into the files folder
-    launch.py gallery ...     the kept pictures (gallery.py: list, save, get, delete)
+    launch.py gallery ...     the kept pictures (gallery.py: list, save, get, ref, delete)
 
 Over SSH the service's key is only allowed this script (install-worker.sh writes it into ~/.ssh/authorized_keys as
 restrict,command="/usr/bin/python3 <root>/worker/launch.py --ssh"): sshd runs it whatever the service asks and leaves

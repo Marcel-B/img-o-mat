@@ -153,6 +153,17 @@
   dialog.preview .step { flex: none; font-size: 22px; width: 40px; height: 56px; padding: 0; background: rgba(255, 255, 255, .1); color: inherit; border: 0; }
   dialog.preview .caption { font-size: 13px; color: #b5b5bd; text-align: center; max-height: 5.5em; overflow: auto; word-break: break-word; }
   dialog.preview .caption .prompt { display: block; }
+  /* What a picture was painted with: prompt, model, seed, LoRAs and the pictures it came from. */
+  dialog.preview .caption.details { text-align: left; max-height: 36vh; width: min(100%, 52rem); margin: 0 auto; display: grid; gap: 6px; }
+  dialog.preview .details .said { color: #ececf0; font-size: 14px; white-space: pre-wrap; }
+  dialog.preview .details summary { cursor: pointer; }
+  dialog.preview .details dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; }
+  dialog.preview .details dt { color: #8a8a92; }
+  dialog.preview .details dd { margin: 0; color: #d5d5dc; }
+  dialog.preview .details .from { display: flex; gap: 8px; flex-wrap: wrap; }
+  dialog.preview .details .from figure { margin: 0; width: 72px; font-size: 11px; text-align: center; }
+  dialog.preview .details .from img, dialog.preview .details .from .gone { width: 72px; height: 72px; object-fit: cover; border-radius: 6px; display: block; background: #26262a; }
+  dialog.preview .details .from .gone { display: flex; align-items: center; justify-content: center; color: #8a8a92; }
   dialog.preview .actions { justify-content: center; }
   dialog.preview .actions a, dialog.preview .actions button { font: inherit; font-size: 14px; text-decoration: none; border-radius: 8px; padding: 6px 14px; border: 1px solid #3a3a40; background: #26262a; color: inherit; }
   dialog.preview .actions a { background: #2fbf98; color: #0b1f19; border-color: #2fbf98; }
@@ -317,6 +328,7 @@
     <a id="previewDownload" download>Herunterladen</a>
     <button class="save" id="previewSave">Speichern</button>
     <button id="previewRef" title="Neben den Prompt legen, um damit weiterzumalen">Als Vorlage</button>
+    <button id="previewReuse" title="Prompt, Modell, Größe, Seed, LoRAs und Vorlagen in die Malen-Felder übernehmen">Übernehmen</button>
     <button class="remove" id="previewDelete">Löschen</button>
     <button id="previewClose">Schließen</button>
   </div>
@@ -326,6 +338,9 @@ const $ = id => document.getElementById(id);
 let models = [], loras = [], current = null;
 // Pictures for the next painting, in order: {id, url, width, height, sha, error, ready}.
 let refs = [], refSeq = 0;
+// Every uploaded picture's small copy by its hash, so a painted picture can show what it was painted from after the
+// picture left the prompt. Kept for the page's life: a few hundred kB each.
+const refUrls = {};
 
 async function api(path, options = {}) {
   const response = await fetch(path, options);
@@ -438,7 +453,9 @@ async function shrink(blob) {
 // The first picture brings its own size: an edit should come out in the picture's shape, at about a megapixel.
 function useSizeOf(ref) {
   const ratio = ref.width / ref.height;
-  const fit = v => Math.min(2048, Math.max(256, Math.round(v / 16) * 16));
+  // Shrunk as a whole when one side would pass 2048, so a panorama keeps its shape.
+  const over = Math.min(1, 2048 / Math.max(Math.sqrt(REF_PIXELS * ratio), Math.sqrt(REF_PIXELS / ratio)));
+  const fit = v => Math.min(2048, Math.max(256, Math.round(v * over / 16) * 16));
   const w = fit(Math.sqrt(REF_PIXELS * ratio)), h = fit(Math.sqrt(REF_PIXELS / ratio));
   let option = $('size').querySelector('option[data-from-ref]');
   if (!option) { option = document.createElement('option'); option.dataset.fromRef = '1'; $('size').prepend(option); }
@@ -461,6 +478,7 @@ function addRefs(blobs) {
       renderRefs();
       const answer = await api('/v1/files', { method: 'POST', headers: { 'content-type': 'image/jpeg', 'x-llm-app': 'img-o-mat' }, body: small.blob });
       ref.sha = answer.sha256;
+      refUrls[ref.sha] = ref.url;
     })().catch(error => { ref.error = error.message; }).finally(renderRefs);
     waits.push(ref.ready);
   }
@@ -471,7 +489,6 @@ function addRefs(blobs) {
 function dropRef(id) {
   const ref = refs.find(r => r.id === id);
   if (!ref) return;
-  if (ref.url) URL.revokeObjectURL(ref.url);
   refs = refs.filter(r => r !== ref);
   if (!refs.length) {
     const option = $('size').querySelector('option[data-from-ref]');
@@ -645,6 +662,11 @@ async function paint() {
     model: $('model').value, prompt: $('prompt').value, size: $('size').value, n: Number($('n').value),
     stream: true, creator: 'img-o-mat', loras: loraNames.map(name => ({ name })),
   };
+  // Label and strength as they are now, for the gallery: the library's strength can change later. Not sent to paint.
+  Object.defineProperty(body, 'loraDetails', { enumerable: false, value: loraNames.map(name => {
+    const lora = loras.find(l => l.name === name);
+    return { name, label: lora?.label || name, strength: lora?.strength ?? null };
+  }) });
   if ($('seed').value.trim()) body.seed = Number($('seed').value);
   if (usable.length && model.startImage) body.references = [{ file: usable[0].sha, role: 'start', strength: Number($('refStrength').value) }];
   else if (usable.length) body.references = usable.map(r => ({ file: r.sha }));
@@ -702,6 +724,10 @@ function handle(name, data, body) {
     figure.dataset.file = `img-o-mat-${body.model}-${data.seed}.jpg`;
     // What Speichern sends along, so the gallery can say what the picture was.
     Object.assign(figure.dataset, { model: body.model, seed: data.seed, size: body.size, prompt: data.revised_prompt || body.prompt });
+    figure.dataset.meta = JSON.stringify({
+      model: body.model, prompt: body.prompt, paintedPrompt: data.revised_prompt || null, seed: data.seed, size: body.size,
+      loras: body.loraDetails || [], references: body.references || [],
+    });
     figure.style.setProperty('--ratio', body.size.replace('x', ' / '));
     figure.innerHTML = `<div class="frame"><img src="${url}" alt=""><button class="enlarge" data-enlarge title="Groß ansehen" aria-label="Groß ansehen">⤢</button></div>
       <figcaption>${esc(body.model)} · Seed ${data.seed} · ${data.paintSeconds ?? '?'} s${refCaption(body)}${data.revised_prompt ? '<span class="prompt">' + esc(data.revised_prompt) + '</span>' : ''}</figcaption>`;
@@ -732,7 +758,7 @@ function show(figure) {
   shown = figure;
   const url = figure.dataset.full || figure.querySelector('img').src;
   $('previewImage').src = url;
-  $('previewCaption').innerHTML = figure.querySelector('figcaption').innerHTML;
+  renderCaption(figure);
   $('previewDownload').href = url;
   $('previewDownload').download = figure.dataset.file;
   renderSave(figure);
@@ -740,6 +766,71 @@ function show(figure) {
   $('previewPrev').style.visibility = at > 0 ? '' : 'hidden';
   $('previewNext').style.visibility = at < all.length - 1 ? '' : 'hidden';
   if (!$('preview').open) $('preview').showModal();
+}
+
+const metaOf = figure => { try { return JSON.parse(figure.dataset.meta || 'null'); } catch { return null; } };
+
+// The preview's caption: everything the picture was painted with, when the page or the gallery knows it.
+function renderCaption(figure) {
+  const meta = metaOf(figure);
+  const caption = $('previewCaption');
+  $('previewReuse').hidden = !meta;
+  if (!meta) { caption.className = 'caption'; caption.innerHTML = figure.querySelector('figcaption').innerHTML; return; }
+  caption.className = 'caption details';
+  const label = models.find(m => m.id === meta.model)?.label || meta.model || '?';
+  const rows = [['Modell', esc(label)]];
+  if (meta.size) rows.push(['Größe', esc(meta.size.replace('x', ' × '))]);
+  if (meta.seed != null) rows.push(['Seed', esc(meta.seed)]);
+  if (meta.loras?.length) rows.push(['LoRAs', meta.loras.map(l => `${esc(l.label || l.name)}${l.strength != null ? ' · ' + esc(l.strength) : ''}`).join('<br>')]);
+  if (figure.dataset.saved || meta.savedAt) {
+    const when = meta.savedAt ? new Date(meta.savedAt.replace(/([+-]\d\d)(\d\d)$/, '$1:$2')) : null;
+    rows.push(['Gespeichert', when && !isNaN(when) ? esc(when.toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })) : 'ja']);
+  }
+  const from = (meta.references || []).map((r, i) => {
+    const url = r.sha256 ? `/v1/gallery/ref/${r.sha256}` : refUrls[r.file];
+    const name = r.role === 'start' ? `Start${r.strength != null ? ' · ' + Math.round(r.strength * 100) + ' %' : ''}` : `image ${i + 1}`;
+    return `<figure>${url ? `<img src="${esc(url)}" alt="${esc(name)}">` : '<div class="gone" title="Nicht mitgespeichert">–</div>'}${esc(name)}</figure>`;
+  }).join('');
+  caption.innerHTML = `${meta.prompt ? `<div class="said">${esc(meta.prompt)}</div>` : ''}
+    ${meta.paintedPrompt && meta.paintedPrompt !== meta.prompt ? `<details><summary>So hat es das Modell erweitert</summary><div class="said">${esc(meta.paintedPrompt)}</div></details>` : ''}
+    <dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
+    ${from ? `<div><div>${meta.references[0].role === 'start' ? 'Gemalt über' : 'Vorlagen'}</div><div class="from">${from}</div></div>` : ''}`;
+}
+
+// Puts what a picture was painted with back into the paint view, to paint it again or change one thing.
+async function reuse(meta) {
+  if (meta.model && models.some(m => m.id === meta.model && m.available)) $('model').value = meta.model;
+  if (meta.prompt) $('prompt').value = meta.prompt;
+  $('seed').value = meta.seed ?? '';
+  if (meta.size) {
+    if (![...$('size').options].some(o => o.value === meta.size)) {
+      const option = document.createElement('option');
+      option.value = meta.size; option.textContent = meta.size.replace('x', ' × ');
+      $('size').append(option);
+    }
+    $('size').value = meta.size;
+  }
+  renderPicks();
+  const names = new Set((meta.loras || []).map(l => l.name));
+  document.querySelectorAll('#loraPicks input').forEach(input => { input.checked = names.has(input.value); });
+  const missing = [...names].filter(n => !document.querySelector(`#loraPicks input[value="${CSS.escape(n)}"]`));
+  refs = [];
+  renderRefs();
+  const blobs = [];
+  for (const r of meta.references || []) {
+    const url = r.sha256 ? `/v1/gallery/ref/${r.sha256}` : refUrls[r.file];
+    if (!url) continue;
+    try { blobs.push(await (await fetch(url)).blob()); } catch {}
+  }
+  if (blobs.length) {
+    const size = $('size').value;
+    await addRefs(blobs);
+    // addRefs sets the size from the first picture; the picture's own size wins.
+    if (meta.size) $('size').value = size;
+    const start = (meta.references || []).find(r => r.role === 'start');
+    if (start?.strength != null) { $('refStrength').value = start.strength; $('refStrength').dispatchEvent(new Event('input')); }
+  }
+  $('paintState').textContent = missing.length ? `Diese LoRAs gibt es nicht mehr: ${missing.join(', ')}` : 'übernommen';
 }
 
 function step(by) {
@@ -768,6 +859,7 @@ function updateGalleryEmpty() {
 function galleryFigure(p) {
   const figure = document.createElement('figure');
   figure.dataset.name = p.name;
+  figure.dataset.meta = JSON.stringify(p);
   figure.dataset.full = `/v1/gallery/${p.name}`;
   figure.dataset.file = `img-o-mat-${p.model || 'bild'}-${p.seed ?? p.name}.jpg`;
   if (p.size) figure.style.setProperty('--ratio', p.size.replace('x', ' / '));
@@ -807,16 +899,28 @@ $('previewSave').addEventListener('click', async () => {
   $('previewSave').disabled = true; $('previewSave').textContent = 'speichert …';
   try {
     const { model, seed, size, prompt } = figure.dataset;
+    const meta = metaOf(figure) || {};
     const saved = await api('/v1/gallery', {
       method: 'POST', headers: { 'content-type': 'application/json', 'x-llm-app': 'img-o-mat' },
-      body: JSON.stringify({ b64_json: figure.querySelector('img').src.split(',')[1], model, seed: Number(seed), size, prompt, creator: 'img-o-mat' }),
+      body: JSON.stringify({
+        b64_json: figure.querySelector('img').src.split(',')[1], model, seed: Number(seed), size, creator: 'img-o-mat',
+        prompt: meta.prompt ?? prompt, paintedPrompt: meta.paintedPrompt, loras: meta.loras, references: meta.references,
+      }),
     });
     figure.dataset.saved = saved.name;
     const caption = figure.querySelector('figcaption');
     if (!caption.querySelector('.saved')) caption.insertAdjacentHTML('afterbegin', '<span class="saved">gespeichert</span> · ');
     galleryStale = true;
   } catch (error) { alert(error.message); }
-  if (shown === figure) { renderSave(figure); $('previewCaption').innerHTML = figure.querySelector('figcaption').innerHTML; }
+  if (shown === figure) { renderSave(figure); renderCaption(figure); }
+});
+$('previewReuse').addEventListener('click', () => {
+  const meta = shown && metaOf(shown);
+  if (!meta) return;
+  $('preview').close();
+  if (location.hash !== '#malen') location.hash = '#malen';
+  reuse(meta);
+  $('prompt').focus();
 });
 $('previewRef').addEventListener('click', async () => {
   const figure = shown;
