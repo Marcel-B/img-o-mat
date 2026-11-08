@@ -101,6 +101,21 @@
   .promptfoot #paint { padding: 9px 22px; font-size: 15px; }
   .promptfoot .progress { flex: 1; min-width: 8rem; display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
   .promptfoot .hint { margin: 0; }
+  /* Pictures the model looks at or paints over, small above the prompt; the prompt says what to make of them. */
+  .refs { flex: none; margin-bottom: 10px; display: flex; gap: 8px 14px; flex-wrap: wrap; align-items: center; }
+  .refs .list-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .refs .ref { position: relative; width: 64px; height: 64px; border-radius: 9px; overflow: hidden; border: 1px solid var(--line); background: var(--sunken); }
+  .refs .ref img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .refs .ref .tag { position: absolute; left: 3px; bottom: 3px; max-width: calc(100% - 6px); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 10.5px; font-weight: 650; background: rgba(0, 0, 0, .62); color: #fff; border-radius: 5px; padding: 0 5px; }
+  .refs .ref .drop { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: rgba(0, 0, 0, .62); color: #fff; font-size: 15px; line-height: 22px; }
+  .refs .ref .drop:hover, .refs .ref .drop:focus-visible { background: rgba(0, 0, 0, .85); }
+  .refs .ref.unused img { opacity: .35; }
+  .refs .ref.busy img { opacity: .5; }
+  .refs .ref.failed { border-color: var(--danger); }
+  .refs .about { flex: 1; min-width: 12rem; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; }
+  .refs .about label { margin: 0; display: flex; justify-content: space-between; gap: 8px; }
+  .refs input[type="range"] { padding: 0; border: 0; background: none; box-shadow: none; accent-color: var(--accent); }
+  .promptbar.dropping { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .loras .check { align-items: flex-start; }
   .loras .check input { margin-top: 3px; }
   .loras .check small { display: block; color: var(--muted); font-size: 12px; }
@@ -138,6 +153,17 @@
   dialog.preview .step { flex: none; font-size: 22px; width: 40px; height: 56px; padding: 0; background: rgba(255, 255, 255, .1); color: inherit; border: 0; }
   dialog.preview .caption { font-size: 13px; color: #b5b5bd; text-align: center; max-height: 5.5em; overflow: auto; word-break: break-word; }
   dialog.preview .caption .prompt { display: block; }
+  /* What a picture was painted with: prompt, model, seed, LoRAs and the pictures it came from. */
+  dialog.preview .caption.details { text-align: left; max-height: 36vh; width: min(100%, 52rem); margin: 0 auto; display: grid; gap: 6px; }
+  dialog.preview .details .said { color: #ececf0; font-size: 14px; white-space: pre-wrap; }
+  dialog.preview .details summary { cursor: pointer; }
+  dialog.preview .details dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; }
+  dialog.preview .details dt { color: #8a8a92; }
+  dialog.preview .details dd { margin: 0; color: #d5d5dc; }
+  dialog.preview .details .from { display: flex; gap: 8px; flex-wrap: wrap; }
+  dialog.preview .details .from figure { margin: 0; width: 72px; font-size: 11px; text-align: center; }
+  dialog.preview .details .from img, dialog.preview .details .from .gone { width: 72px; height: 72px; object-fit: cover; border-radius: 6px; display: block; background: #26262a; }
+  dialog.preview .details .from .gone { display: flex; align-items: center; justify-content: center; color: #8a8a92; }
   dialog.preview .actions { justify-content: center; }
   dialog.preview .actions a, dialog.preview .actions button { font: inherit; font-size: 14px; text-decoration: none; border-radius: 8px; padding: 6px 14px; border: 1px solid #3a3a40; background: #26262a; color: inherit; }
   dialog.preview .actions a { background: #2fbf98; color: #0b1f19; border-color: #2fbf98; }
@@ -200,10 +226,22 @@
   <section id="view-malen" class="paint" data-view-panel="malen">
     <div class="card promptbar">
       <label for="prompt">Prompt</label>
+      <div class="refs" id="refs" hidden>
+        <div class="list-row" id="refList"></div>
+        <div class="about">
+          <div id="refHint"></div>
+          <div id="refStrengthBox" hidden>
+            <label for="refStrength"><span>Nähe zum Startbild</span><span id="refStrengthValue">50 %</span></label>
+            <input type="range" id="refStrength" min="0.1" max="0.9" step="0.05" value="0.5">
+          </div>
+        </div>
+      </div>
       <textarea id="prompt" maxlength="2000" placeholder="a red fox in fresh snow, morning light, 35 mm photo"></textarea>
       <div class="row promptfoot">
         <button class="primary" id="paint">Malen</button>
         <button id="cancel" hidden>Abbrechen</button>
+        <button id="refAdd" title="Ein Bild, das das Modell ansieht oder übermalt; auch per Einfügen oder Ziehen in den Prompt">Bild hinzufügen</button>
+        <input type="file" id="refFile" accept="image/*" multiple hidden>
         <div class="progress">
           <div id="paintState" class="muted"></div>
           <div class="bar" id="paintBar" hidden><div></div></div>
@@ -289,6 +327,8 @@
   <div class="row actions">
     <a id="previewDownload" download>Herunterladen</a>
     <button class="save" id="previewSave">Speichern</button>
+    <button id="previewRef" title="Neben den Prompt legen, um damit weiterzumalen">Als Vorlage</button>
+    <button id="previewReuse" title="Prompt, Modell, Größe, Seed, LoRAs und Vorlagen in die Malen-Felder übernehmen">Übernehmen</button>
     <button class="remove" id="previewDelete">Löschen</button>
     <button id="previewClose">Schließen</button>
   </div>
@@ -296,6 +336,11 @@
 <script>
 const $ = id => document.getElementById(id);
 let models = [], loras = [], current = null;
+// Pictures for the next painting, in order: {id, url, width, height, sha, error, ready}.
+let refs = [], refSeq = 0;
+// Every uploaded picture's small copy by its hash, so a painted picture can show what it was painted from after the
+// picture left the prompt. Kept for the page's life: a few hundred kB each.
+const refUrls = {};
 
 async function api(path, options = {}) {
   const response = await fetch(path, options);
@@ -372,6 +417,114 @@ function renderPicks() {
   $('loraPicks').innerHTML = fitting.length
     ? '<span class="label">LoRAs (bis zu 3)</span>' + fitting.map(l => `<label class="check" title="${esc(l.label)}${l.trigger ? ' · ' + esc(l.trigger) : ''}"><input type="checkbox" value="${esc(l.name)}" ${picked.has(l.name) ? 'checked' : ''}><span><span class="clip">${esc(l.label)}</span>${l.trigger ? `<small class="clip">${esc(l.trigger)}</small>` : ''}</span></label>`).join('')
     : '';
+  renderRefs();
+}
+
+// Pictures go to the service once, by content (POST /v1/files: browsers hash only on HTTPS or localhost), shrunk to
+// about a megapixel: FLUX.2 Klein turns every reference into as many tokens as a picture of its size, and a full phone
+// photo would cost memory and minutes for nothing. Re-encoding also turns the photo upright (EXIF), which the worker's
+// Pillow would not.
+const MAX_REFS = 4, REF_PIXELS = 1024 * 1024;
+
+function loadImage(blob) {
+  return new Promise((resolve, reject) => {
+    const image = new Image(), url = URL.createObjectURL(blob);
+    image.onload = () => { URL.revokeObjectURL(url); resolve(image); };
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Das ist kein Bild, das dieser Browser lesen kann.')); };
+    image.src = url;
+  });
+}
+
+async function shrink(blob) {
+  const image = await loadImage(blob);
+  const scale = Math.min(1, Math.sqrt(REF_PIXELS / (image.naturalWidth * image.naturalHeight)));
+  const width = Math.max(1, Math.round(image.naturalWidth * scale)), height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  const context = canvas.getContext('2d');
+  // Transparent parts of a PNG become white rather than black.
+  context.fillStyle = '#fff'; context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  const out = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+  if (!out) throw new Error('Das Bild ließ sich nicht verkleinern.');
+  return { blob: out, width, height };
+}
+
+// The first picture brings its own size: an edit should come out in the picture's shape, at about a megapixel.
+function useSizeOf(ref) {
+  const ratio = ref.width / ref.height;
+  // Shrunk as a whole when one side would pass 2048, so a panorama keeps its shape.
+  const over = Math.min(1, 2048 / Math.max(Math.sqrt(REF_PIXELS * ratio), Math.sqrt(REF_PIXELS / ratio)));
+  const fit = v => Math.min(2048, Math.max(256, Math.round(v * over / 16) * 16));
+  const w = fit(Math.sqrt(REF_PIXELS * ratio)), h = fit(Math.sqrt(REF_PIXELS / ratio));
+  let option = $('size').querySelector('option[data-from-ref]');
+  if (!option) { option = document.createElement('option'); option.dataset.fromRef = '1'; $('size').prepend(option); }
+  option.value = `${w}x${h}`; option.textContent = `${w} × ${h} · wie Bild 1`;
+  $('size').value = option.value;
+}
+
+function addRefs(blobs) {
+  const images = [...blobs].filter(b => !b.type || b.type.startsWith('image/'));
+  const waits = [];
+  for (const blob of images) {
+    if (refs.length >= MAX_REFS) { $('paintState').textContent = `Höchstens ${MAX_REFS} Bilder.`; break; }
+    const ref = { id: ++refSeq, url: null, sha: null, error: null };
+    const first = !refs.length;
+    refs.push(ref);
+    ref.ready = (async () => {
+      const small = await shrink(blob);
+      Object.assign(ref, { url: URL.createObjectURL(small.blob), width: small.width, height: small.height });
+      if (first && refs[0] === ref) useSizeOf(ref);
+      renderRefs();
+      const answer = await api('/v1/files', { method: 'POST', headers: { 'content-type': 'image/jpeg', 'x-llm-app': 'img-o-mat' }, body: small.blob });
+      ref.sha = answer.sha256;
+      refUrls[ref.sha] = ref.url;
+    })().catch(error => { ref.error = error.message; }).finally(renderRefs);
+    waits.push(ref.ready);
+  }
+  renderRefs();
+  return Promise.all(waits);
+}
+
+function dropRef(id) {
+  const ref = refs.find(r => r.id === id);
+  if (!ref) return;
+  refs = refs.filter(r => r !== ref);
+  if (!refs.length) {
+    const option = $('size').querySelector('option[data-from-ref]');
+    if (option) { const was = $('size').value === option.value; option.remove(); if (was) $('size').value = '1024x1024'; }
+  }
+  renderRefs();
+}
+
+// How many of the pictures the chosen model uses: FLUX.2 Klein and FLUX 3 look at up to four, Z-Image and Krea 2 paint
+// over the first one (img2img).
+function refsTaken(model) {
+  return model?.references || (model?.startImage ? 1 : 0);
+}
+
+function renderRefs() {
+  const model = models.find(m => m.id === $('model').value);
+  const takes = refsTaken(model);
+  const start = !!model?.startImage;
+  $('refAdd').hidden = !takes && !refs.length;
+  $('refAdd').disabled = !takes || refs.length >= MAX_REFS;
+  $('refs').hidden = !refs.length;
+  $('refList').innerHTML = refs.map((r, i) => {
+    const used = i < takes;
+    const state = r.error ? 'failed' : r.sha ? '' : 'busy';
+    const tag = !used ? 'aus' : r.error ? 'Fehler' : !r.sha ? 'lädt …' : start ? 'Start' : `image ${i + 1}`;
+    return `<div class="ref ${used ? '' : 'unused'} ${state}" title="${esc(r.error || (used ? '' : 'Dieses Modell nimmt so viele Bilder nicht.'))}">${r.url ? `<img src="${r.url}" alt="Bild ${i + 1}">` : ''}<span class="tag">${esc(tag)}</span><button class="drop" data-ref-drop="${r.id}" title="Entfernen" aria-label="Bild ${i + 1} entfernen">×</button></div>`;
+  }).join('');
+  $('refStrengthBox').hidden = !(start && refs.length);
+  const lookers = models.filter(m => m.references).map(m => m.label);
+  const failed = refs.find(r => r.error);
+  let hint;
+  if (failed) hint = `<span class="danger">${esc(failed.error)}</span>`;
+  else if (!takes) hint = `<span class="warn">${esc(model?.label || 'Dieses Modell')} nimmt keine Bilder.</span>${lookers.length ? ' Ansehen können sie ' + esc(lookers.join(', ')) + '.' : ''}`;
+  else if (start) hint = `${esc(model.label)} malt über das Startbild; der Prompt sagt, was daraus werden soll.${refs.length > 1 ? ' Nur das erste Bild zählt.' : ''}`;
+  else hint = `${esc(model.label)} sieht ${takes === 1 ? 'das Bild' : 'bis zu ' + takes + ' Bilder'} an. Sag im Prompt, was sich ändern soll („make it winter“), oder zeig mit „image 1“, „image 2“ auf sie.`;
+  $('refHint').innerHTML = hint;
 }
 
 // The LoRA view shows one model at a time: what is on the disk for it and what could be fetched for it.
@@ -496,11 +649,28 @@ async function paint() {
   const loraNames = [...document.querySelectorAll('#loraPicks input:checked')].map(i => i.value);
   if (loraNames.length > 3) { $('paintState').textContent = 'Höchstens drei LoRAs.'; return; }
   if (!$('prompt').value.trim()) { $('paintState').textContent = 'Erst einen Prompt schreiben.'; $('prompt').focus(); return; }
+  const model = models.find(m => m.id === $('model').value);
+  const takes = refsTaken(model);
+  if (takes && refs.some(r => !r.sha && !r.error)) {
+    $('paint').disabled = true;
+    $('paintState').textContent = 'Bilder werden noch hochgeladen …';
+    try { await Promise.all(refs.map(r => r.ready)); } finally { $('paint').disabled = false; }
+  }
+  const usable = refs.slice(0, takes);
+  if (usable.some(r => r.error)) { $('paintState').innerHTML = '<span class="danger">Ein Bild ist nicht angekommen; entferne es und füge es neu hinzu.</span>'; return; }
   const body = {
     model: $('model').value, prompt: $('prompt').value, size: $('size').value, n: Number($('n').value),
     stream: true, creator: 'img-o-mat', loras: loraNames.map(name => ({ name })),
   };
+  // Label and strength as they are now, for the gallery: the library's strength can change later. Not sent to paint.
+  Object.defineProperty(body, 'loraDetails', { enumerable: false, value: loraNames.map(name => {
+    const lora = loras.find(l => l.name === name);
+    return { name, label: lora?.label || name, strength: lora?.strength ?? null };
+  }) });
   if ($('seed').value.trim()) body.seed = Number($('seed').value);
+  if (usable.length && model.startImage) body.references = [{ file: usable[0].sha, role: 'start', strength: Number($('refStrength').value) }];
+  else if (usable.length) body.references = usable.map(r => ({ file: r.sha }));
+  if (!body.size) body.size = '1024x1024';
   try { localStorage.setItem('img-o-mat.form', JSON.stringify({ model: body.model, prompt: body.prompt, size: body.size, n: body.n })); } catch {}
   $('paint').disabled = true; $('cancel').hidden = false; $('paintBar').hidden = false;
   $('paintBar').firstElementChild.style.width = '0';
@@ -534,6 +704,12 @@ async function paint() {
   }
 }
 
+function refCaption(body) {
+  const given = body.references || [];
+  if (!given.length) return '';
+  return given[0].role === 'start' ? ' · über Startbild' : ` · ${given.length === 1 ? 'eine Vorlage' : given.length + ' Vorlagen'}`;
+}
+
 const stages = { queued: 'wartet', sending: 'überträgt Dateien', loading: 'lädt das Modell', painting: 'malt', checking: 'prüft den Inhalt' };
 
 function handle(name, data, body) {
@@ -548,9 +724,13 @@ function handle(name, data, body) {
     figure.dataset.file = `img-o-mat-${body.model}-${data.seed}.jpg`;
     // What Speichern sends along, so the gallery can say what the picture was.
     Object.assign(figure.dataset, { model: body.model, seed: data.seed, size: body.size, prompt: data.revised_prompt || body.prompt });
+    figure.dataset.meta = JSON.stringify({
+      model: body.model, prompt: body.prompt, paintedPrompt: data.revised_prompt || null, seed: data.seed, size: body.size,
+      loras: body.loraDetails || [], references: body.references || [],
+    });
     figure.style.setProperty('--ratio', body.size.replace('x', ' / '));
     figure.innerHTML = `<div class="frame"><img src="${url}" alt=""><button class="enlarge" data-enlarge title="Groß ansehen" aria-label="Groß ansehen">⤢</button></div>
-      <figcaption>${esc(body.model)} · Seed ${data.seed} · ${data.paintSeconds ?? '?'} s${data.revised_prompt ? '<span class="prompt">' + esc(data.revised_prompt) + '</span>' : ''}</figcaption>`;
+      <figcaption>${esc(body.model)} · Seed ${data.seed} · ${data.paintSeconds ?? '?'} s${refCaption(body)}${data.revised_prompt ? '<span class="prompt">' + esc(data.revised_prompt) + '</span>' : ''}</figcaption>`;
     // A finished picture takes the place of the last placeholder, so the order stays the order of painting.
     const pending = [...document.querySelectorAll('#pictures figure.pending')];
     if (pending.length) pending[pending.length - 1].replaceWith(figure); else $('pictures').prepend(figure);
@@ -578,7 +758,7 @@ function show(figure) {
   shown = figure;
   const url = figure.dataset.full || figure.querySelector('img').src;
   $('previewImage').src = url;
-  $('previewCaption').innerHTML = figure.querySelector('figcaption').innerHTML;
+  renderCaption(figure);
   $('previewDownload').href = url;
   $('previewDownload').download = figure.dataset.file;
   renderSave(figure);
@@ -586,6 +766,71 @@ function show(figure) {
   $('previewPrev').style.visibility = at > 0 ? '' : 'hidden';
   $('previewNext').style.visibility = at < all.length - 1 ? '' : 'hidden';
   if (!$('preview').open) $('preview').showModal();
+}
+
+const metaOf = figure => { try { return JSON.parse(figure.dataset.meta || 'null'); } catch { return null; } };
+
+// The preview's caption: everything the picture was painted with, when the page or the gallery knows it.
+function renderCaption(figure) {
+  const meta = metaOf(figure);
+  const caption = $('previewCaption');
+  $('previewReuse').hidden = !meta;
+  if (!meta) { caption.className = 'caption'; caption.innerHTML = figure.querySelector('figcaption').innerHTML; return; }
+  caption.className = 'caption details';
+  const label = models.find(m => m.id === meta.model)?.label || meta.model || '?';
+  const rows = [['Modell', esc(label)]];
+  if (meta.size) rows.push(['Größe', esc(meta.size.replace('x', ' × '))]);
+  if (meta.seed != null) rows.push(['Seed', esc(meta.seed)]);
+  if (meta.loras?.length) rows.push(['LoRAs', meta.loras.map(l => `${esc(l.label || l.name)}${l.strength != null ? ' · ' + esc(l.strength) : ''}`).join('<br>')]);
+  if (figure.dataset.saved || meta.savedAt) {
+    const when = meta.savedAt ? new Date(meta.savedAt.replace(/([+-]\d\d)(\d\d)$/, '$1:$2')) : null;
+    rows.push(['Gespeichert', when && !isNaN(when) ? esc(when.toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })) : 'ja']);
+  }
+  const from = (meta.references || []).map((r, i) => {
+    const url = r.sha256 ? `/v1/gallery/ref/${r.sha256}` : refUrls[r.file];
+    const name = r.role === 'start' ? `Start${r.strength != null ? ' · ' + Math.round(r.strength * 100) + ' %' : ''}` : `image ${i + 1}`;
+    return `<figure>${url ? `<img src="${esc(url)}" alt="${esc(name)}">` : '<div class="gone" title="Nicht mitgespeichert">–</div>'}${esc(name)}</figure>`;
+  }).join('');
+  caption.innerHTML = `${meta.prompt ? `<div class="said">${esc(meta.prompt)}</div>` : ''}
+    ${meta.paintedPrompt && meta.paintedPrompt !== meta.prompt ? `<details><summary>So hat es das Modell erweitert</summary><div class="said">${esc(meta.paintedPrompt)}</div></details>` : ''}
+    <dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
+    ${from ? `<div><div>${meta.references[0].role === 'start' ? 'Gemalt über' : 'Vorlagen'}</div><div class="from">${from}</div></div>` : ''}`;
+}
+
+// Puts what a picture was painted with back into the paint view, to paint it again or change one thing.
+async function reuse(meta) {
+  if (meta.model && models.some(m => m.id === meta.model && m.available)) $('model').value = meta.model;
+  if (meta.prompt) $('prompt').value = meta.prompt;
+  $('seed').value = meta.seed ?? '';
+  if (meta.size) {
+    if (![...$('size').options].some(o => o.value === meta.size)) {
+      const option = document.createElement('option');
+      option.value = meta.size; option.textContent = meta.size.replace('x', ' × ');
+      $('size').append(option);
+    }
+    $('size').value = meta.size;
+  }
+  renderPicks();
+  const names = new Set((meta.loras || []).map(l => l.name));
+  document.querySelectorAll('#loraPicks input').forEach(input => { input.checked = names.has(input.value); });
+  const missing = [...names].filter(n => !document.querySelector(`#loraPicks input[value="${CSS.escape(n)}"]`));
+  refs = [];
+  renderRefs();
+  const blobs = [];
+  for (const r of meta.references || []) {
+    const url = r.sha256 ? `/v1/gallery/ref/${r.sha256}` : refUrls[r.file];
+    if (!url) continue;
+    try { blobs.push(await (await fetch(url)).blob()); } catch {}
+  }
+  if (blobs.length) {
+    const size = $('size').value;
+    await addRefs(blobs);
+    // addRefs sets the size from the first picture; the picture's own size wins.
+    if (meta.size) $('size').value = size;
+    const start = (meta.references || []).find(r => r.role === 'start');
+    if (start?.strength != null) { $('refStrength').value = start.strength; $('refStrength').dispatchEvent(new Event('input')); }
+  }
+  $('paintState').textContent = missing.length ? `Diese LoRAs gibt es nicht mehr: ${missing.join(', ')}` : 'übernommen';
 }
 
 function step(by) {
@@ -614,6 +859,7 @@ function updateGalleryEmpty() {
 function galleryFigure(p) {
   const figure = document.createElement('figure');
   figure.dataset.name = p.name;
+  figure.dataset.meta = JSON.stringify(p);
   figure.dataset.full = `/v1/gallery/${p.name}`;
   figure.dataset.file = `img-o-mat-${p.model || 'bild'}-${p.seed ?? p.name}.jpg`;
   if (p.size) figure.style.setProperty('--ratio', p.size.replace('x', ' / '));
@@ -653,16 +899,44 @@ $('previewSave').addEventListener('click', async () => {
   $('previewSave').disabled = true; $('previewSave').textContent = 'speichert …';
   try {
     const { model, seed, size, prompt } = figure.dataset;
+    const meta = metaOf(figure) || {};
     const saved = await api('/v1/gallery', {
       method: 'POST', headers: { 'content-type': 'application/json', 'x-llm-app': 'img-o-mat' },
-      body: JSON.stringify({ b64_json: figure.querySelector('img').src.split(',')[1], model, seed: Number(seed), size, prompt, creator: 'img-o-mat' }),
+      body: JSON.stringify({
+        b64_json: figure.querySelector('img').src.split(',')[1], model, seed: Number(seed), size, creator: 'img-o-mat',
+        prompt: meta.prompt ?? prompt, paintedPrompt: meta.paintedPrompt, loras: meta.loras, references: meta.references,
+      }),
     });
     figure.dataset.saved = saved.name;
     const caption = figure.querySelector('figcaption');
     if (!caption.querySelector('.saved')) caption.insertAdjacentHTML('afterbegin', '<span class="saved">gespeichert</span> · ');
     galleryStale = true;
   } catch (error) { alert(error.message); }
-  if (shown === figure) { renderSave(figure); $('previewCaption').innerHTML = figure.querySelector('figcaption').innerHTML; }
+  if (shown === figure) { renderSave(figure); renderCaption(figure); }
+});
+$('previewReuse').addEventListener('click', () => {
+  const meta = shown && metaOf(shown);
+  if (!meta) return;
+  $('preview').close();
+  if (location.hash !== '#malen') location.hash = '#malen';
+  reuse(meta);
+  $('prompt').focus();
+});
+$('previewRef').addEventListener('click', async () => {
+  const figure = shown;
+  if (!figure) return;
+  $('previewRef').disabled = true;
+  try {
+    // A painted picture is a data URL on this page, a gallery picture lies on the Mac's disk; both arrive as a blob.
+    const response = await fetch(figure.dataset.full || figure.querySelector('img').src);
+    if (!response.ok) throw new Error(`Das Bild kam nicht (HTTP ${response.status}).`);
+    const blob = await response.blob();
+    $('preview').close();
+    if (location.hash !== '#malen') location.hash = '#malen';
+    addRefs([blob]);
+    $('prompt').focus();
+  } catch (error) { alert(error.message); }
+  $('previewRef').disabled = false;
 });
 $('previewDelete').addEventListener('click', async () => {
   if (!shown) return;
@@ -731,6 +1005,33 @@ document.addEventListener('change', async event => {
 });
 
 $('model').addEventListener('change', renderPicks);
+$('refAdd').addEventListener('click', () => $('refFile').click());
+$('refFile').addEventListener('change', () => { addRefs($('refFile').files); $('refFile').value = ''; });
+$('refList').addEventListener('click', event => {
+  const button = event.target.closest('[data-ref-drop]');
+  if (button) dropRef(Number(button.dataset.refDrop));
+});
+$('refStrength').addEventListener('input', () => { $('refStrengthValue').textContent = `${Math.round($('refStrength').value * 100)} %`; });
+// A picture pasted into the prompt or dropped onto it joins the others; text pasted with it stays text.
+$('prompt').addEventListener('paste', event => {
+  const files = [...(event.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'));
+  if (!files.length || !refsTaken(models.find(m => m.id === $('model').value))) return;
+  if (!event.clipboardData.types.includes('text/plain')) event.preventDefault();
+  addRefs(files);
+});
+const promptbar = document.querySelector('.promptbar');
+promptbar.addEventListener('dragover', event => {
+  if (!event.dataTransfer.types.includes('Files')) return;
+  event.preventDefault();
+  promptbar.classList.add('dropping');
+});
+promptbar.addEventListener('dragleave', event => { if (!promptbar.contains(event.relatedTarget)) promptbar.classList.remove('dropping'); });
+promptbar.addEventListener('drop', event => {
+  if (!event.dataTransfer.files.length) return;
+  event.preventDefault();
+  promptbar.classList.remove('dropping');
+  addRefs(event.dataTransfer.files);
+});
 $('paint').addEventListener('click', paint);
 $('prompt').addEventListener('keydown', event => {
   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); paint(); }
@@ -760,7 +1061,7 @@ $('loraUpload').addEventListener('click', async () => {
 try {
   const saved = JSON.parse(localStorage.getItem('img-o-mat.form') || '{}');
   if (saved.prompt) $('prompt').value = saved.prompt;
-  if (saved.size) $('size').value = saved.size;
+  if (saved.size && [...$('size').options].some(o => o.value === saved.size)) $('size').value = saved.size;
   if (saved.n) $('n').value = saved.n;
   load().then(() => { if (saved.model && models.some(m => m.id === saved.model && m.available)) { $('model').value = saved.model; renderPicks(); } });
 } catch { load(); }

@@ -67,7 +67,8 @@ Mit [Onkel Bummel](https://github.com/Marcel-B/onkel-bummel) schickt der Dienst 
 Reines HTML, CSS und JavaScript in einer Datei (`service/ui.html`), ohne Framework, Bibliotheken oder Web-Fonts. Oben stehen vier Bereiche (Malen, Modelle, LoRAs, Galerie; die Adresse merkt sich, welcher offen ist) und ob der Mac, der malt, antwortet. Hell oder dunkel folgt dem System.
 
 - **Malen:** Links Modell, Größe, Anzahl, Seed, die LoRAs, die zum Modell passen (mit eigenem Scrollbereich, wenn es viele sind), und die Warteschlange; rechts oben die Bilder (etwa zwei Drittel der Höhe, scrollen für sich, das neueste zuerst) und fest darunter der Prompt mit Fortschritt; auf dem Handy erst der Prompt, dann die Einstellungen, dann die Bilder; solange gemalt wird, hält ein Platzhalter in der gewählten Größe die Stelle frei. Strg/⌘ + Enter im Prompt malt. Der Knopf oben rechts am Bild (oder ein Klick aufs Bild) öffnet eine große Vorschau mit Herunterladen, Speichern und Löschen; die Pfeiltasten blättern. Die Bilder liegen nur auf der Seite: Wer neu lädt oder löscht, hat sie nicht mehr, der Dienst behält keine. Speichern legt ein Bild in die Galerie auf der T7 (mit Modell, Seed, Größe und Prompt); dasselbe Bild zweimal wird nur einmal gespeichert. Englisch malt am besten. Tonwerk übersetzt für seine Cover vorher mit Claude, die Seite tut das nicht.
-- **Galerie:** Die gespeicherten Bilder, das neueste zuerst, als kleine Vorschau. Ein Klick öffnet die große Vorschau mit Herunterladen und Löschen (löscht das Bild auf der T7). Die kleinen Vorschauen macht `sips` auf oi-o-mat beim Speichern, der Dienst hebt sie auf, damit die Galerie schnell aufgeht.
+- **Bilder als Vorlage:** „Bild hinzufügen“ unter dem Prompt (oder ein Bild in den Prompt einfügen oder hineinziehen, oder „Als Vorlage“ in der großen Vorschau, auch aus der Galerie) legt bis zu vier Bilder klein über den Prompt. FLUX.2 Klein 4B/9B und FLUX 3 Klein sehen sie an: Der Prompt sagt, was sich ändern soll („make it winter“), oder zeigt mit „image 1“, „image 2“ auf sie. Z-Image Turbo und Krea 2 Turbo malen stattdessen über das erste Bild (img2img), ein Regler sagt, wie nah es am Startbild bleibt (10 bis 90 %). Die Seite verkleinert jedes Bild vorher auf etwa ein Megapixel, und das erste stellt die Größe auf sein Seitenverhältnis. Bilder, die das gewählte Modell nicht nimmt, bleiben liegen und sind als „aus“ markiert.
+- **Galerie:** Die gespeicherten Bilder, das neueste zuerst, als kleine Vorschau. Ein Klick öffnet die große Vorschau mit Herunterladen und Löschen (löscht das Bild auf der T7). Darunter steht, womit es gemalt wurde: Prompt (bei FLUX 3 auch, was der Upsampler daraus gemacht hat), Modell, Größe, Seed, die LoRAs mit ihrer Stärke und die Vorlagen als kleine Bilder. Übernehmen trägt das alles wieder in die Malen-Felder ein, auch die Vorlagen; so malt man ein Bild noch einmal oder ändert nur eine Sache. Dasselbe zeigt die Vorschau eines frisch gemalten Bildes. Die kleinen Vorschauen macht `sips` auf oi-o-mat beim Speichern, der Dienst hebt sie auf, damit die Galerie schnell aufgeht.
 - **Warteschlange:** Was gerade malt und wer wartet, auch Anfragen anderer Apps.
 - **Modelle:** Lizenz, ob kommerziell nutzbar, Speicher, ob heruntergeladen, und ein Knopf zum Herunterladen (15 bis 35 GB auf die T7; er prüft vorher den Platz). Nie von selbst.
 - **LoRAs:** Oben wählst du ein Modell. Darunter stehen die LoRAs, die für dieses Modell schon auf der Platte liegen (Name, Modell, Trigger und Stärke ändern, löschen), und die, die du von Hugging Face laden kannst (bisher nur Krea 2 Turbo, Krea hat für die anderen Modelle keine offiziellen). Eigene Dateien lädst du unten hoch; das Modell erkennt der Dienst meist aus der Datei, sonst gilt das oben gewählte.
@@ -83,11 +84,13 @@ OpenAI-kompatibel, wo OpenAI etwas hat, also gehen auch dessen Clients. Fehler h
 | `POST /v1/images/generations` | malen, siehe unten |
 | `DELETE /v1/jobs/<id>` | ein Bild abbrechen (die Kennung steht in `X-Img-Job`) |
 | `HEAD`/`PUT /v1/files/<sha256>` | Referenzbild (oder LoRA außerhalb der Bibliothek) einmal hochladen, danach per Hash nennen |
+| `POST /v1/files` | ein Bild (bis 32 MB) hochladen, ohne den Hash vorher zu kennen; Antwort `{"sha256"}`, `201` neu, `200` schon da (so lädt die Seite ihre Vorlagen hoch) |
 | `GET /v1/loras`, `PUT`/`PATCH`/`DELETE /v1/loras/<name>`, `POST /v1/loras/fetch` | die LoRA-Bibliothek; `PUT` nimmt die Datei als Inhalt, `label`, `model`, `trigger`, `strength` als Query |
 | `GET /v1/busy` | was gerade malt: `busy`, `app`, `model`, `memoryGb`, `since`, `waiting`; billig, Tonwerk fragt es, bevor es den Speicher belegt |
 | `GET /v1/gallery` | die gespeicherten Bilder (`name`, `model`, `seed`, `size`, `prompt`, `app`, `savedAt`, `bytes`) und `disk`; `503`, wenn die Platte fehlt |
-| `POST /v1/gallery` | ein Bild behalten: `{"b64_json", "model", "seed", "size", "prompt"}`; `201` neu, `200` schon da, Antwort `{"name", "created"}` |
-| `GET`/`DELETE /v1/gallery/<name>` | das Bild als JPEG (`?thumb=1` klein) oder löschen |
+| `POST /v1/gallery` | ein Bild behalten: `{"b64_json", "model", "seed", "size", "prompt", "paintedPrompt", "loras": [{"name", "label", "strength"}], "references": [{"file", "role", "strength"}]}`; die Vorlagen nimmt der Dienst aus seinen hochgeladenen Dateien und legt sie mit auf die T7; `201` neu, `200` schon da, Antwort `{"name", "created"}` |
+| `GET`/`DELETE /v1/gallery/<name>` | das Bild als JPEG (`?thumb=1` klein) oder löschen; eine Vorlage geht mit dem letzten Bild, das sie nennt |
+| `GET /v1/gallery/ref/<sha256>` | eine Vorlage eines gespeicherten Bildes als JPEG |
 | `GET /status` | oi-o-mat (Speicher, Platz, Token), was malt, was wartet, die letzten Bilder, Downloads |
 
 ```sh
@@ -130,6 +133,10 @@ Das Dashboard und das Ziel liegen im Monitoring-Stack (Tonwerk-AI, `deploy/monit
 Python 3.9 oder neuer, ohne Pakete. `python3 -m unittest discover tests` spielt den ganzen Weg gegen nachgestellte Maler (`tests/fake`) durch, lokal und über einen nachgestellten `ssh`, der wie der erzwungene Befehl arbeitet. Die echten Maler (`worker/paint.py`, `fetch.py`) brauchen einen Mac mit Apple Silicon.
 
 ## Was getestet ist
+
+Stand 2026-11-08: Prompt, LoRAs, Seed und Vorlagen in der Galerie laufen in den Tests (lokal) und einmal in Chromium mit den nachgestellten Malern (speichern, Detailansicht, Übernehmen). Auf oi-o-mat mit der T7 noch nicht.
+
+Stand 2026-11-08: Vorlagen auf der Seite liefen in Chromium mit den nachgestellten Malern (zwei Bilder für Klein 4B, ein Bild aus der Vorschau, Startbild für Z-Image), und `POST /v1/files` in den Tests. Ob Klein (mflux' Edit-Pipeline), FLUX 3 und das Startbild bei Z-Image und Krea 2 auf oi-o-mat wirklich malen, zeigt erst das erste echte Bild; dieser Weg stammt aus Tonwerk und lief hier noch nie mit echten Modellen.
 
 Stand 2026-11-05: Die Galerie läuft in den Tests lokal und über den nachgestellten `ssh` (speichern, doppelt speichern, auflisten, ausliefern, löschen, fehlende Platte), und die Seite einmal in Chromium mit den nachgestellten Malern (Speichern in der Vorschau, Galerie, Löschen). Auf oi-o-mat mit der echten T7 und `sips`, und im Proxmox-Container, ist sie noch nicht gelaufen.
 

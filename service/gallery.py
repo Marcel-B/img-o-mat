@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 
 NAME = re.compile(r"\d{8}-\d{6}-[0-9a-f]{12}")
+HASH = re.compile(r"[0-9a-f]{64}")
 # The worker's exit codes (worker/gallery.py EXIT) as HTTP statuses; 255 is ssh's own.
 STATUS = {2: 400, 3: 503, 4: 404, 255: 502}
 
@@ -55,8 +56,10 @@ class Gallery:
     def list(self) -> dict:
         return json.loads(self._run("list"))
 
-    def save(self, jpeg_b64: str, meta: dict) -> dict:
-        saved = json.loads(self._run("save", data=json.dumps({"jpeg": jpeg_b64, "meta": meta}).encode()))
+    def save(self, jpeg_b64: str, meta: dict, references: list | None = None) -> dict:
+        """references: [{"jpeg": "<base64>", "role", "strength"}], the pictures it was painted from, kept beside it."""
+        asked = {"jpeg": jpeg_b64, "meta": meta, "references": references or []}
+        saved = json.loads(self._run("save", data=json.dumps(asked).encode()))
         if saved.get("created"):
             self.log(f"Bild {saved['name']} in die Galerie gelegt ({meta.get('app')}, {meta.get('model')}).")
         return saved
@@ -77,6 +80,24 @@ class Gallery:
             with os.fdopen(handle, "wb") as out:
                 out.write(data)
             os.replace(temporary, cached)
+        return data
+
+    def reference(self, digest: str) -> bytes:
+        """A picture a kept one was painted from; cached like the small copies, since its name is its content."""
+        if not HASH.fullmatch(digest):
+            raise GalleryError(404, "Dieses Vorlagenbild gibt es in der Galerie nicht.")
+        cached = os.path.join(self.cache, "refs", digest + ".jpg")
+        try:
+            with open(cached, "rb") as file:
+                return file.read()
+        except FileNotFoundError:
+            pass
+        data = self._run("ref", digest)
+        os.makedirs(os.path.dirname(cached), exist_ok=True)
+        handle, temporary = tempfile.mkstemp(dir=os.path.dirname(cached), prefix=".get-")
+        with os.fdopen(handle, "wb") as out:
+            out.write(data)
+        os.replace(temporary, cached)
         return data
 
     def delete(self, name: str) -> dict:

@@ -138,6 +138,41 @@ class ServiceTest(unittest.TestCase):
         status, body, _ = self.call("DELETE", f"/v1/gallery/{saved['name']}")
         self.assertEqual(status, 404, body)
 
+    def test_the_gallery_keeps_loras_and_the_pictures_it_was_painted_from(self):
+        status, body, _ = self.paint(seed=33, prompt="a fox in a jersey")
+        picture = body["data"][0]["b64_json"]
+        reference = b"\xff\xd8\xff reference for the gallery"
+        digest = hashlib.sha256(reference).hexdigest()
+        self.assertEqual(self.call("POST", "/v1/files", raw=reference)[0], 201)
+        keep = {"b64_json": picture, "model": "klein-4b", "seed": 33, "size": "1024x1024", "prompt": "a fox in a jersey",
+                "paintedPrompt": "a red fox wearing a football jersey",
+                "loras": [{"name": "trikot", "label": "Trikot", "strength": 0.8}, {"no": "name"}],
+                "references": [{"file": digest, "role": "figure", "strength": None},
+                               {"file": "0" * 64, "role": "start", "strength": 0.5}]}
+        status, saved, _ = self.call("POST", "/v1/gallery", keep, {"X-Llm-App": "img-o-mat"})
+        self.assertEqual(status, 201, saved)
+        _, listed, _ = self.call("GET", "/v1/gallery")
+        entry = next(p for p in listed["pictures"] if p["name"] == saved["name"])
+        self.assertEqual(entry["loras"], [{"name": "trikot", "label": "Trikot", "strength": 0.8}])
+        self.assertEqual(entry["paintedPrompt"], "a red fox wearing a football jersey")
+        # The second was gone from the service: named, without a picture.
+        self.assertEqual(entry["references"], [{"role": "figure", "strength": None, "sha256": digest},
+                                               {"role": "start", "strength": 0.5}])
+        status, data, response = self.call("GET", f"/v1/gallery/ref/{digest}")
+        self.assertEqual((status, data, response.getheader("content-type")), (200, reference, "image/jpeg"))
+        self.assertEqual(self.call("GET", "/v1/gallery/ref/" + "1" * 64)[0], 404)
+        self.assertEqual(self.call("GET", "/v1/gallery/ref/nothex")[0], 404)
+
+        # A second picture from the same reference shares it; it goes with the last of them.
+        other = dict(keep, b64_json=base64.b64encode(base64.b64decode(picture) + b"\0").decode())
+        status, second, _ = self.call("POST", "/v1/gallery", other)
+        self.assertEqual(status, 201, second)
+        kept = os.path.join(self.root, "gallery", ".refs", digest + ".jpg")
+        self.call("DELETE", f"/v1/gallery/{saved['name']}")
+        self.assertTrue(os.path.exists(kept))
+        self.call("DELETE", f"/v1/gallery/{second['name']}")
+        self.assertFalse(os.path.exists(kept))
+
     def test_the_gallery_refuses_what_is_no_picture(self):
         cases = [
             ({"b64_json": base64.b64encode(b"GIF89a").decode()}, 400, "kein JPEG"),
@@ -230,6 +265,26 @@ class ServiceTest(unittest.TestCase):
         status, body, _ = self.paint(model="z-image-turbo", references=[{"file": digest, "role": "style"}])
         self.assertEqual(status, 400)
         self.assertIn("keine Referenzbilder", body["error"]["message"])
+
+    def test_the_page_uploads_pictures_by_content(self):
+        content = b"\xff\xd8 picture from the page"
+        digest = hashlib.sha256(content).hexdigest()
+        status, body, _ = self.call("POST", "/v1/files", raw=content, headers={"content-type": "image/jpeg"})
+        self.assertEqual((status, body), (201, {"sha256": digest}))
+        status, body, _ = self.call("POST", "/v1/files", raw=content, headers={"content-type": "image/jpeg"})
+        self.assertEqual((status, body), (200, {"sha256": digest}))
+        self.assertEqual(self.call("HEAD", f"/v1/files/{digest}")[0], 200)
+        self.assertEqual(self.call("POST", "/v1/files", raw=b"")[0], 400)
+        status, body, _ = self.paint(references=[{"file": digest}])
+        self.assertEqual(status, 200, body)
+        self.assertEqual(self.last_request()["references"], [{"file": digest, "role": "style", "strength": None}])
+
+    def test_the_page_offers_pictures_to_look_at_and_paint_over(self):
+        _, page, _ = self.call("GET", "/")
+        page = page.decode()
+        for part in ('id="refAdd"', 'id="refFile"', 'id="refStrength"', 'id="previewRef"', 'id="previewReuse"', "'/v1/files'",
+                     "role: 'start'", "/v1/gallery/ref/"):
+            self.assertIn(part, page)
 
     def test_loras_from_the_library(self):
         # FLUX.2's fused single-block layer, 3072 wide: Klein 4B.
