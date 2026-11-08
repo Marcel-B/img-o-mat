@@ -379,6 +379,41 @@ class ServiceTest(unittest.TestCase):
         else:
             self.fail("the painting process is still running")
 
+    def test_the_page_lines_up_paintings(self):
+        _, page, _ = self.call("GET", "/")
+        page = page.decode()
+        for part in ("SENT_AHEAD = 2", "Einreihen", "data-drop-job", "auf dieser Seite", "beforeunload"):
+            self.assertIn(part, page)
+
+    def test_a_painting_sent_ahead_waits_its_turn(self):
+        """The page sends its next painting while one paints; the service keeps it waiting and says so in the stream."""
+        painter = self.service.painter
+        blocker = self.service.job_from({"model": "klein-4b", "prompt": "slow block"}, "img-o-mat", 50)
+        painter.submit(blocker)
+        for _ in range(100):
+            if painter.running is blocker:
+                break
+            time.sleep(0.05)
+        result = {}
+        asking = threading.Thread(target=lambda: result.update(answer=self.call(
+            "POST", "/v1/images/generations", {"model": "klein-4b", "prompt": "next fox", "stream": True}, {"x-llm-app": "img-o-mat"})))
+        asking.start()
+        for _ in range(100):
+            if painter.status()["queue"]:
+                break
+            time.sleep(0.05)
+        self.assertEqual([j["app"] for j in painter.status()["queue"]], ["img-o-mat"])
+        painter.cancel(blocker)
+        asking.join(30)
+        # The blocker's pid would mislead the cancel test.
+        pid_file = os.path.join(self.root, "slow.pid")
+        if os.path.exists(pid_file):
+            os.remove(pid_file)
+        text = result["answer"][1].decode()
+        self.assertLess(text.index("event: queued"), text.index("event: image"))
+        self.assertIn('"place": 1', text)
+        self.assertTrue(text.rstrip().split("\n\n")[-1].startswith("event: done"))
+
     def test_priority_goes_first(self):
         painter = self.service.painter
         blocker = self.service.job_from({"model": "klein-4b", "prompt": "slow block"}, "a", 50)
