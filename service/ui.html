@@ -328,6 +328,7 @@
     <a id="previewDownload" download>Herunterladen</a>
     <button class="save" id="previewSave">Speichern</button>
     <button id="previewRef" title="Neben den Prompt legen, um damit weiterzumalen">Als Vorlage</button>
+    <button id="previewRefine" title="Mit einem Modell, das über Bilder malt (Krea 2 Turbo), noch einmal darübermalen: gleicher Aufbau, mehr Details">Verfeinern</button>
     <button id="previewReuse" title="Prompt, Modell, Größe, Seed, LoRAs und Vorlagen in die Malen-Felder übernehmen">Übernehmen</button>
     <button class="remove" id="previewDelete">Löschen</button>
     <button id="previewClose">Schließen</button>
@@ -775,6 +776,9 @@ function renderCaption(figure) {
   const meta = metaOf(figure);
   const caption = $('previewCaption');
   $('previewReuse').hidden = !meta;
+  const by = refiner();
+  $('previewRefine').hidden = !by;
+  if (by) $('previewRefine').title = `Mit ${by.label} noch einmal darübermalen (Nähe ${Math.round(REFINE_STRENGTH * 100)} %): gleicher Aufbau, mehr Details`;
   if (!meta) { caption.className = 'caption'; caption.innerHTML = figure.querySelector('figcaption').innerHTML; return; }
   caption.className = 'caption details';
   const label = models.find(m => m.id === meta.model)?.label || meta.model || '?';
@@ -798,7 +802,7 @@ function renderCaption(figure) {
 }
 
 // Puts what a picture was painted with back into the paint view, to paint it again or change one thing.
-async function reuse(meta) {
+async function reuse(meta, given = null) {
   if (meta.model && models.some(m => m.id === meta.model && m.available)) $('model').value = meta.model;
   if (meta.prompt) $('prompt').value = meta.prompt;
   $('seed').value = meta.seed ?? '';
@@ -816,8 +820,8 @@ async function reuse(meta) {
   const missing = [...names].filter(n => !document.querySelector(`#loraPicks input[value="${CSS.escape(n)}"]`));
   refs = [];
   renderRefs();
-  const blobs = [];
-  for (const r of meta.references || []) {
+  const blobs = given ? [...given] : [];
+  for (const r of given ? [] : meta.references || []) {
     const url = r.sha256 ? `/v1/gallery/ref/${r.sha256}` : refUrls[r.file];
     if (!url) continue;
     try { blobs.push(await (await fetch(url)).blob()); } catch {}
@@ -831,6 +835,35 @@ async function reuse(meta) {
     if (start?.strength != null) { $('refStrength').value = start.strength; $('refStrength').dispatchEvent(new Event('input')); }
   }
   $('paintState').textContent = missing.length ? `Diese LoRAs gibt es nicht mehr: ${missing.join(', ')}` : 'übernommen';
+}
+
+// Verfeinern: a picture painted over once more by a model that paints over a start picture, close to it, so layout,
+// clothes and faces stay and the model adds its own detail (Klein keeps the jersey, Krea 2 draws skin). Krea 2 first,
+// it draws the finest faces of them; Z-Image when Krea 2 cannot paint on this Mac.
+const REFINE_STRENGTH = 0.85;
+const REFINERS = ['krea-2-turbo', 'z-image-turbo'];
+
+function refiner() {
+  const usable = models.filter(m => m.startImage && m.available);
+  return REFINERS.map(id => usable.find(m => m.id === id)).find(Boolean) || usable[0] || null;
+}
+
+async function refine(figure) {
+  const model = refiner();
+  if (!model) return;
+  const meta = metaOf(figure) || {};
+  const response = await fetch(figure.dataset.full || figure.querySelector('img').src);
+  if (!response.ok) throw new Error(`Das Bild kam nicht (HTTP ${response.status}).`);
+  const blob = await response.blob();
+  $('preview').close();
+  if (location.hash !== '#malen') location.hash = '#malen';
+  const seed = meta.seed ?? (figure.dataset.seed ? Number(figure.dataset.seed) : null);
+  // The LoRAs belong to the first model; the picture is the only start, at the size it was painted in.
+  await reuse({
+    model: model.id, prompt: meta.prompt || figure.dataset.prompt || $('prompt').value, seed,
+    size: meta.size || figure.dataset.size, loras: [], references: [{ role: 'start', strength: REFINE_STRENGTH }],
+  }, [blob]);
+  paint();
 }
 
 function step(by) {
@@ -913,6 +946,12 @@ $('previewSave').addEventListener('click', async () => {
     galleryStale = true;
   } catch (error) { alert(error.message); }
   if (shown === figure) { renderSave(figure); renderCaption(figure); }
+});
+$('previewRefine').addEventListener('click', async () => {
+  if (!shown) return;
+  $('previewRefine').disabled = true;
+  try { await refine(shown); } catch (error) { alert(error.message); }
+  $('previewRefine').disabled = false;
 });
 $('previewReuse').addEventListener('click', () => {
   const meta = shown && metaOf(shown);
