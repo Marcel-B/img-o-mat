@@ -29,7 +29,7 @@ Die Bildmodelle von oi-o-mat als Dienst für alle Apps: FLUX.2 Klein 4B und 9B, 
    ```sh
    deploy/to-proxmox.sh
    ```
-   Das kopiert das Repository auf den Proxmox-Host (ssh-Name `proxmox`) und legt dort beim ersten Mal den Container `img-o-mat` mit Tailscale an. Beim ersten Mal zeigt `tailscale up` einen Link, oder du gibst `TS_AUTHKEY=…` mit. Danach trägt es den Schlüssel des Dienstes auf oi-o-mat ein, überträgt den Hugging-Face-Token und prüft, ob der Dienst oi-o-mat sieht. Für ein Update genügt derselbe Aufruf.
+   Das kopiert das Repository auf den Proxmox-Host (ssh-Name `nuc`, sonst `PROXMOX=…` mitgeben) und legt dort beim ersten Mal den Container `img-o-mat` mit Tailscale an. Beim ersten Mal zeigt `tailscale up` einen Link, oder du gibst `TS_AUTHKEY=…` mit. Danach trägt es den Schlüssel des Dienstes auf oi-o-mat ein, überträgt den Hugging-Face-Token und prüft, ob der Dienst oi-o-mat sieht. Für ein Update genügt derselbe Aufruf.
 3. Die Seite: **http://img-o-mat:1236/** (über Tailscale).
 
 Der Hugging-Face-Token für Klein 9B und Krea 2 liegt wie bisher in `~/.config/tonwerk/huggingface.token`. Auf oi-o-mat lädt er die Modelle, im Container holt er LoRAs.
