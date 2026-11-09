@@ -71,6 +71,7 @@ Reines HTML, CSS und JavaScript in einer Datei (`service/ui.html`), ohne Framewo
 - **Galerie:** Die gespeicherten Bilder, das neueste zuerst, als kleine Vorschau. Ein Klick öffnet die große Vorschau mit Herunterladen und Löschen (löscht das Bild auf der T7). Darunter steht, womit es gemalt wurde: Prompt (bei FLUX 3 auch, was der Upsampler daraus gemacht hat), Modell, Größe, Seed, die LoRAs mit ihrer Stärke und die Vorlagen als kleine Bilder. Übernehmen trägt das alles wieder in die Malen-Felder ein, auch die Vorlagen; so malt man ein Bild noch einmal oder ändert nur eine Sache. Dasselbe zeigt die Vorschau eines frisch gemalten Bildes. Die kleinen Vorschauen macht `sips` auf oi-o-mat beim Speichern, der Dienst hebt sie auf, damit die Galerie schnell aufgeht.
 - **Warteschlange:** Was gerade malt und wer wartet, auch Anfragen anderer Apps.
 - **Modelle:** Lizenz, ob kommerziell nutzbar, Speicher, ob heruntergeladen, und ein Knopf zum Herunterladen (15 bis 35 GB auf die T7; er prüft vorher den Platz). Nie von selbst.
+- **Videos** (unter Modelle): LTX-2.3 in 8 Bit (für ltx-2-mlx, 81 GB mit dem Textencoder Gemma 3 12B) und Wan 2.2 TI2V 5B in 8 Bit (für rapid-mlx, 20 GB, auf dem Stand, den rapid-mlx 1.0.2 festlegt). Sie lassen sich vorerst nur auf die T7 laden, gemalt wird mit ihnen noch nicht, und sie stehen weder im Malen-Formular noch in `GET /v1/models`, Tonwerk sieht sie also nicht. Beide brauchen einen Mac mit 32 GB.
 - **LoRAs:** Oben wählst du ein Modell. Darunter stehen die LoRAs, die für dieses Modell schon auf der Platte liegen (Name, Modell, Trigger und Stärke ändern, löschen), und die, die du von Hugging Face laden kannst (bisher nur Krea 2 Turbo, Krea hat für die anderen Modelle keine offiziellen). Eigene Dateien lädst du unten hoch; das Modell erkennt der Dienst meist aus der Datei, sonst gilt das oben gewählte.
 
 ## Schnittstelle
@@ -80,7 +81,8 @@ OpenAI-kompatibel, wo OpenAI etwas hat, also gehen auch dessen Clients. Fehler h
 | Aufruf | Wirkung |
 | --- | --- |
 | `GET /v1/models` | die Modelle mit `available`/`unavailable` (Grund), `downloaded`, `memoryGb`, `downloadGb`, `license`, `commercial`, `contentFilter`, `loras`, `references`, `startImage`, `lettering`; `?fresh=1` fragt oi-o-mat neu |
-| `POST /v1/models/<id>/download` | Download auf oi-o-mat starten (202); Stand unter `download` im Modell |
+| `GET /v1/models?kind=video` | die Videomodelle (`kind: "video"`, `paints: false`), nur zum Herunterladen |
+| `POST /v1/models/<id>/download` | Download auf oi-o-mat starten (202), auch für ein Videomodell; Stand unter `download` im Modell |
 | `POST /v1/images/generations` | malen, siehe unten |
 | `DELETE /v1/jobs/<id>` | ein Bild abbrechen (die Kennung steht in `X-Img-Job`) |
 | `HEAD`/`PUT /v1/files/<sha256>` | Referenzbild (oder LoRA außerhalb der Bibliothek) einmal hochladen, danach per Hash nennen |
@@ -133,6 +135,8 @@ Das Dashboard und das Ziel liegen im Monitoring-Stack (Tonwerk-AI, `deploy/monit
 Python 3.9 oder neuer, ohne Pakete. `python3 -m unittest discover tests` spielt den ganzen Weg gegen nachgestellte Maler (`tests/fake`) durch, lokal und über einen nachgestellten `ssh`, der wie der erzwungene Befehl arbeitet. Die echten Maler (`worker/paint.py`, `fetch.py`) brauchen einen Mac mit Apple Silicon.
 
 ## Was getestet ist
+
+Stand 2026-11-09: Die Videomodelle laufen in den Tests (nicht in `GET /v1/models`, Download mit dem festgelegten Stand für Wan) und einmal in Chromium mit den nachgestellten Malern (Abschnitt Videos, Platzprüfung bei LTX). Ob die echten Repositories mit diesen Namen und Größen auf die T7 kommen, zeigt erst der erste Download auf oi-o-mat; die Größen stehen so auf Hugging Face, der Speicher ist geschätzt.
 
 Stand 2026-11-08: Verfeinern lief in Chromium mit den nachgestellten Malern (Klein 9B, dann Krea 2 mit dem Bild als Startbild, Nähe 85 %, gleicher Seed und Größe). Ob 85 % mit echtem Krea 2 die richtige Nähe ist, zeigt erst der Versuch auf oi-o-mat.
 

@@ -1,7 +1,8 @@
 """Downloads a model's repositories into the cache, for the service's download button (and the LLM gate's
 "Installieren"). Runs with mflux's Python, which has huggingface_hub; the token is read like paint.py does.
 
-In: {"repos": ["krea/Krea-2-Turbo", ...], "expectedGb": 35} on stdin
+In: {"repos": ["krea/Krea-2-Turbo", ...], "revisions": {"<repo>": "<commit>"}, "expectedGb": 35} on stdin; a repository
+without a revision is downloaded as it is now.
 Out: "IMGOMAT " events: {"event": "progress", "gb": 3.2, "fraction": 0.09} every few seconds, then {"event": "done"};
 on failure an "Error: ..." line and exit code 1.
 """
@@ -54,7 +55,7 @@ def main() -> int:
         return 1
     try:
         for repo in asked["repos"]:
-            snapshot_download(repo)
+            snapshot_download(repo, revision=(asked.get("revisions") or {}).get(repo))
     except Exception as error:
         name = type(error).__name__
         if name in ("GatedRepoError", "RepositoryNotFoundError") or "401" in str(error) or "403" in str(error):

@@ -301,6 +301,8 @@
       <button id="refresh">Neu prüfen</button>
     </div>
     <div class="list" id="models"></div>
+    <div class="group-head"><h2>Videos</h2><span class="count">vorerst nur zum Herunterladen</span></div>
+    <div class="list" id="videoModels"></div>
   </section>
 
   <section id="view-loras" data-view-panel="loras" hidden>
@@ -365,7 +367,7 @@
 </dialog>
 <script>
 const $ = id => document.getElementById(id);
-let models = [], loras = [], current = null;
+let models = [], videoModels = [], loras = [], current = null;
 // Pictures for the next painting, in order: {id, url, width, height, sha, error, ready}.
 let refs = [], refSeq = 0;
 // Every uploaded picture's small copy by its hash, so a painted picture can show what it was painted from after the
@@ -411,24 +413,30 @@ function modelState(m) {
 function modelBadge(m) {
   if (m.download?.state === 'running' || m.download?.state === 'waiting') return '<span class="badge">lädt</span>';
   if (!m.available) return '<span class="badge warn">nicht verfügbar</span>';
-  if (m.downloaded) return '<span class="badge ok">bereit</span>';
+  if (m.downloaded) return m.kind === 'video' ? '<span class="badge ok">heruntergeladen</span>' : '<span class="badge ok">bereit</span>';
   return '<span class="badge">nicht geladen</span>';
 }
 
+function modelCard(m) {
+  const state = modelState(m);
+  const video = m.kind === 'video';
+  return `<div class="card item">
+    <div class="top"><div><div class="name">${esc(m.label)}</div>
+      <div class="tags">${video ? `<span>${esc(m.runner)}</span>` : ''}${m.lettering ? '<span>Schrift</span>' : ''}${m.loras ? '<span>LoRAs</span>' : ''}${m.references ? `<span>${m.references} Referenzen</span>` : ''}${m.startImage ? '<span>Startbild</span>' : ''}${m.contentFilter ? '<span>Inhaltsfilter</span>' : ''}${m.minSystemGb ? `<span>ab ${m.minSystemGb} GB</span>` : ''}</div></div>
+      ${modelBadge(m)}</div>
+    <dl class="facts">
+      <dt>Lizenz</dt><dd>${esc(m.license)}</dd>
+      <dt>Nutzung</dt><dd>${m.commercial ? 'kommerziell nutzbar' : 'nur privat'}${m.gated ? ', gesperrt' : ''}</dd>
+      <dt>Speicher</dt><dd>${m.memoryGb} GB${video ? ' (geschätzt)' : ''}</dd>
+      ${video ? `<dt>Download</dt><dd>${m.downloadGb} GB</dd><dt>Malen</dt><dd>noch nicht</dd>` : ''}
+    </dl>
+    ${state ? `<div class="foot">${state}</div>` : ''}</div>`;
+}
+
 function renderModels() {
-  $('models').innerHTML = models.map(m => {
-    const state = modelState(m);
-    return `<div class="card item">
-      <div class="top"><div><div class="name">${esc(m.label)}</div>
-        <div class="tags">${m.lettering ? '<span>Schrift</span>' : ''}${m.loras ? '<span>LoRAs</span>' : ''}${m.references ? `<span>${m.references} Referenzen</span>` : ''}${m.startImage ? '<span>Startbild</span>' : ''}${m.contentFilter ? '<span>Inhaltsfilter</span>' : ''}${m.minSystemGb ? `<span>ab ${m.minSystemGb} GB</span>` : ''}</div></div>
-        ${modelBadge(m)}</div>
-      <dl class="facts">
-        <dt>Lizenz</dt><dd>${esc(m.license)}</dd>
-        <dt>Nutzung</dt><dd>${m.commercial ? 'kommerziell nutzbar' : 'nur privat'}${m.gated ? ', gesperrt' : ''}</dd>
-        <dt>Speicher</dt><dd>${m.memoryGb} GB</dd>
-      </dl>
-      ${state ? `<div class="foot">${state}</div>` : ''}</div>`;
-  }).join('') || '<div class="empty">Keine Modelle.</div>';
+  $('models').innerHTML = models.map(modelCard).join('') || '<div class="empty">Keine Modelle.</div>';
+  // Video models only wait on the T7 for now; they never reach the painting form.
+  $('videoModels').innerHTML = videoModels.map(modelCard).join('') || '<div class="empty">Keine Videomodelle.</div>';
   const chosen = $('model').value;
   $('model').innerHTML = models.map(m => `<option value="${esc(m.id)}" ${m.available ? '' : 'disabled'}>${esc(m.label)}${m.available ? (m.downloaded ? '' : ' (lädt beim ersten Bild)') : ' (nicht verfügbar)'}</option>`).join('');
   if (chosen && models.some(m => m.id === chosen)) $('model').value = chosen;
@@ -628,8 +636,9 @@ function renderStatus(status) {
 
 async function load(fresh = false) {
   try {
-    const [m, l] = await Promise.all([api('/v1/models' + (fresh ? '?fresh=1' : '')), api('/v1/loras')]);
+    const [m, v, l] = await Promise.all([api('/v1/models' + (fresh ? '?fresh=1' : '')), api('/v1/models?kind=video'), api('/v1/loras')]);
     models = m.data;
+    videoModels = v.data;
     renderModels();
     renderLoras(l);
   } catch (error) {
@@ -641,8 +650,8 @@ async function load(fresh = false) {
 async function poll() {
   try {
     renderStatus(await api('/status'));
-    if (models.some(m => ['running', 'waiting'].includes(m.download?.state))) {
-      models = (await api('/v1/models')).data;
+    if ([...models, ...videoModels].some(m => ['running', 'waiting'].includes(m.download?.state))) {
+      [models, videoModels] = (await Promise.all([api('/v1/models'), api('/v1/models?kind=video')])).map(r => r.data);
       renderModels();
     }
     // Fetching a LoRA runs in the background; keep asking until it is on the disk.

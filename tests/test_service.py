@@ -349,6 +349,35 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(model["download"]["state"], "done", model["download"])
         self.assertTrue(model["downloaded"])
 
+    def test_video_models_wait_apart_from_the_image_models(self):
+        # Tonwerk and the other clients list /v1/models and paint from it: no video model may show up there.
+        _, listed, _ = self.call("GET", "/v1/models")
+        self.assertFalse({"ltx-2.3", "wan-2.2-ti2v-5b"} & {m["id"] for m in listed["data"]})
+        status, videos, _ = self.call("GET", "/v1/models?kind=video&fresh=1")
+        self.assertEqual(status, 200)
+        ltx = next(m for m in videos["data"] if m["id"] == "ltx-2.3")
+        self.assertEqual((ltx["kind"], ltx["paints"], ltx["downloaded"]), ("video", False, False))
+        # This Mac has 24 GB; the runner not being installed is no reason, nothing paints videos yet.
+        self.assertIn("32 GB", ltx["unavailable"])
+        status, body, _ = self.paint(model="ltx-2.3")
+        self.assertEqual(status, 400, body)
+
+    def test_downloads_a_video_model_at_its_pinned_commit(self):
+        status, state, _ = self.call("POST", "/v1/models/wan-2.2-ti2v-5b/download")
+        self.assertEqual(status, 202, state)
+        for _ in range(100):
+            _, videos, _ = self.call("GET", "/v1/models?kind=video&fresh=1")
+            wan = next(m for m in videos["data"] if m["id"] == "wan-2.2-ti2v-5b")
+            if wan["download"]["state"] in ("done", "failed"):
+                break
+            time.sleep(0.1)
+        self.assertEqual(wan["download"]["state"], "done", wan["download"])
+        self.assertTrue(wan["downloaded"])
+        with open(os.path.join(self.root, "last-fetch.json")) as file:
+            asked = json.load(file)
+        self.assertEqual(asked["repos"], ["Anes1032/Wan2.2-TI2V-5B-mlx-q8"])
+        self.assertEqual(asked["revisions"], {"Anes1032/Wan2.2-TI2V-5B-mlx-q8": "9624723c94ddf509832555c45e223a035baa7d1c"})
+
     def test_cancel_kills_the_painting_process(self):
         result = {}
 
