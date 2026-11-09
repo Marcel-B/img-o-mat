@@ -771,6 +771,10 @@ class VideoTest(unittest.TestCase):
         os.makedirs(scripts, exist_ok=True)
         with open(os.path.join(scripts, "generate.py"), "w") as file:
             file.write("# fake installation")
+        streaming = os.path.join(self.root, "minimax-h3-streaming", "minimax_h3_mlx")
+        os.makedirs(streaming, exist_ok=True)
+        with open(os.path.join(streaming, "streaming.py"), "w") as file:
+            file.write("# fake streaming installation")
         model = self.service.catalogue.find_video("minimax-h3-mlx-4bit")
         for repo in (model["repo"], *model["moreRepos"]):
             os.makedirs(os.path.join(self.root, "models", "hub", "models--" + repo.replace("/", "--"), "snapshots"), exist_ok=True)
@@ -845,10 +849,10 @@ class VideoTest(unittest.TestCase):
                        "quality": "high", "seed": 7, "width": 1344, "height": 768, "lowRam": True,
                        "images": [{"file": "a" * 64, "at": "last"}]}
             with patch.object(video, "snapshot", side_effect=lambda repo: "/cache/" + repo):
-                args = video.minimax_command(request, {"files": folder, "minimaxSource": "/runner"}, "/out.mp4")
+                args = video.minimax_command(request, {"files": folder, "minimaxSource": "/runner", "minimaxStreamingSource": "/stream"}, "/out.mp4")
             for flag, value in (("--checkpoint", "/cache/base/FL2VA"), ("--transformer", "/cache/quant"),
                                 ("--steps", "17"), ("--duration", "15"), ("--anchor", "last"),
-                                ("--quantized-text-encoder", "/cache/encoder"), ("--source", "/runner")):
+                                ("--quantized-text-encoder", "/cache/encoder"), ("--source", "/runner"), ("--streaming-source", "/stream")):
                 self.assertEqual(args[args.index(flag) + 1], value)
             self.assertEqual(args[:3], [sys.executable, "-u", os.path.join(ROOT, "worker", "minimax_generate.py")])
             self.assertIn("--low-ram", args)

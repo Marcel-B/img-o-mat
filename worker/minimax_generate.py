@@ -100,12 +100,13 @@ def main() -> None:
     parser.add_argument("--source", required=True)
     parser.add_argument("--quantized-text-encoder", required=True)
     parser.add_argument("--low-ram", action="store_true")
+    parser.add_argument("--streaming-source", type=Path)
     arguments, remaining = parser.parse_known_args()
     source = Path(arguments.source)
     sys.path.insert(0, str(source))
     if arguments.low_ram:
         from minimax_low_ram import generate
-        generate(source, Path(arguments.quantized_text_encoder), remaining)
+        generate(source, Path(arguments.quantized_text_encoder), remaining, streaming_source=arguments.streaming_source)
         return
     install_encoder(Path(arguments.quantized_text_encoder))
     script = source / "scripts" / "generate.py"

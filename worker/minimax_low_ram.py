@@ -97,8 +97,12 @@ def run_stage(stage: str, request: dict, folder: Path) -> None:
                     (folder / "audio-shape.json").write_text(json.dumps(num_frames))
                     return np.empty((2, 0), dtype=np.float32)
 
-            # No encoder or VAE weights are alive while the DiT is loaded and sampled.
-            pipe = SamplingPipeline(load.load_dit(request["transformer"]), CachedEncoder(), video, audio, config)
+            from minimax_h3_mlx.streaming import load_streaming_dit
+
+            # Only static weights and one reusable block slot are resident; AdaLN is streamed too.
+            model, provider = load_streaming_dit(request["transformer"], stream_block_group_size=1, verbose=True)
+            pipe = SamplingPipeline(model, CachedEncoder(), video, audio, config)
+            pipe._block_provider = provider
             result = pipe(
                 request["prompt"], duration_seconds=request["duration"],
                 num_inference_steps=request["steps"], seed=request["seed"],
@@ -123,7 +127,7 @@ def run_stage(stage: str, request: dict, folder: Path) -> None:
     print(f"MINIMAX_PEAK_GB={peak:.3f}", flush=True)
 
 
-def generate(source: Path, encoder: Path, remaining: list[str]) -> None:
+def generate(source: Path, encoder: Path, remaining: list[str], *, streaming_source: Path | None = None) -> None:
     parser = argparse.ArgumentParser(description="MiniMax H3: sequential 32 GB mode")
     parser.add_argument("prompt")
     parser.add_argument("--output", required=True)
@@ -141,7 +145,9 @@ def generate(source: Path, encoder: Path, remaining: list[str]) -> None:
         parser.error("Der 32-GB-Modus ist vorerst auf 768 × 768 und 5 Sekunden begrenzt.")
     if len(args.image) != len(args.anchor):
         parser.error("Jedes Bild braucht einen first/last-Anker.")
-    request = {**vars(args), "source": str(source), "encoder": str(encoder)}
+    if streaming_source is None or not (streaming_source / "minimax_h3_mlx" / "streaming.py").is_file():
+        parser.error("MiniMax-Blockstreaming fehlt; install-worker.sh auf dem Mac ausführen.")
+    request = {**vars(args), "source": str(source), "encoder": str(encoder), "streamingSource": str(streaming_source)}
     # Keep phase artifacts alongside worker/video.py's temporary clip.
     with tempfile.TemporaryDirectory(prefix="phases-", dir=str(Path(args.output).parent)) as temporary:
         folder = Path(temporary)
@@ -164,5 +170,6 @@ def generate(source: Path, encoder: Path, remaining: list[str]) -> None:
 if __name__ == "__main__":
     stage, path = sys.argv[2:]
     request = read_json(path)
-    sys.path.insert(0, request["source"])
+    # Separate processes prevent the identically named fork packages from mixing in sys.modules.
+    sys.path.insert(0, request["streamingSource"] if stage == "sample" else request["source"])
     run_stage(stage, request, Path(path).parent)

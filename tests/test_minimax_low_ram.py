@@ -19,6 +19,9 @@ import minimax_low_ram
 
 class LowRamTest(unittest.TestCase):
     def arguments(self, folder, extra=None):
+        streaming = Path(folder) / "minimax_h3_mlx"
+        streaming.mkdir(exist_ok=True)
+        (streaming / "streaming.py").write_text("# fake streaming implementation")
         return ["--output", str(Path(folder) / "clip.mp4"), "--checkpoint", "/base", "--transformer", "/quant",
                 *(extra or []), "--", "a fox"]
 
@@ -41,7 +44,7 @@ class LowRamTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch.object(minimax_low_ram.subprocess, "run", side_effect=run), \
              patch.dict(sys.modules, {"numpy": fake_numpy, "minimax_h3_mlx.media": SimpleNamespace(save_mp4=save)}), \
              contextlib.redirect_stdout(io.StringIO()):
-            minimax_low_ram.generate(Path("/source"), Path("/encoder"), self.arguments(folder, ["--image", "/image", "--anchor", "last"]))
+            minimax_low_ram.generate(Path("/source"), Path("/encoder"), self.arguments(folder, ["--image", "/image", "--anchor", "last"]), streaming_source=Path(folder))
             self.assertEqual(stages, ["encode", "keyframes", "sample", "video", "audio"])
             self.assertEqual(save.call_count, 1)
             self.assertFalse(phase_folder.exists())
@@ -54,7 +57,7 @@ class LowRamTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder, patch.object(minimax_low_ram.subprocess, "run", side_effect=fail), \
              contextlib.redirect_stdout(io.StringIO()), self.assertRaises(subprocess.CalledProcessError):
-            minimax_low_ram.generate(Path("/source"), Path("/encoder"), self.arguments(folder))
+            minimax_low_ram.generate(Path("/source"), Path("/encoder"), self.arguments(folder), streaming_source=Path(folder))
         self.assertEqual(len(phases), 1)
         self.assertFalse(phases[0].exists())
 
@@ -62,8 +65,14 @@ class LowRamTest(unittest.TestCase):
         for extra in (["--duration", "10"], ["--width", "1344"], ["--image", "/image"]):
             with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stderr(io.StringIO()), \
                  patch.object(minimax_low_ram.subprocess, "run") as run, self.assertRaises(SystemExit):
-                minimax_low_ram.generate(Path("/source"), Path("/encoder"), self.arguments(folder, extra))
+                minimax_low_ram.generate(Path("/source"), Path("/encoder"), self.arguments(folder, extra), streaming_source=Path(folder))
             run.assert_not_called()
+
+    def test_missing_streaming_runner_fails_before_loading_weights(self):
+        with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stderr(io.StringIO()), \
+             patch.object(minimax_low_ram.subprocess, "run") as run, self.assertRaises(SystemExit):
+            minimax_low_ram.generate(Path("/source"), Path("/encoder"), self.arguments(folder))
+        run.assert_not_called()
 
 
 @unittest.skipUnless(importlib.util.find_spec("mlx") and os.environ.get("IMG_O_MAT_MINIMAX_SOURCE"),
@@ -139,7 +148,8 @@ class SamplingParityTest(unittest.TestCase):
                            "seed": 17, "steps": 3, "height": 32, "width": 32,
                            "image": ["image"] * len(anchors), "anchor": anchors}
                 with patch.object(MiniMaxH3Pipeline, "_ensure_cache"), \
-                     patch.object(load, "load_dit", return_value=TinyDit()) as load_dit, \
+                     patch.object(load, "load_dit") as load_dit, \
+                     patch.dict(sys.modules, {"minimax_h3_mlx.streaming": SimpleNamespace(load_streaming_dit=Mock(return_value=(TinyDit(), object())))}), \
                      patch.object(load, "load_video_vae") as load_video, \
                      patch.object(load, "load_audio_vae") as load_audio, \
                      patch.object(minimax_low_ram, "pipeline_parts", return_value=(TinyDit(), video, audio, config)), \
@@ -149,7 +159,7 @@ class SamplingParityTest(unittest.TestCase):
                         images=request["image"] or None, keyframe_anchors=tuple(anchors),
                     )
                     minimax_low_ram.run_stage("sample", request, folder)
-                    load_dit.assert_called_once()
+                    load_dit.assert_not_called()
                     load_video.assert_not_called()
                     load_audio.assert_not_called()
                 actual_video = mx.load(str(folder / "video-latents.safetensors"))["rows"]

@@ -54,6 +54,7 @@ def settings() -> dict:
         "python": expand(values.get("python") or os.path.join(ROOT, "env", "bin", "python")),
         "flux3Python": expand(values.get("flux3Python") or os.path.join(ROOT, "flux3", "bin", "python")),
         "minimaxPython": expand(values.get("minimaxPython") or os.path.join(ROOT, "minimax", "bin", "python")),
+        "minimaxStreamingSource": expand(values.get("minimaxStreamingSource") or os.path.join(ROOT, "minimax-h3-streaming")),
         "minimaxSource": expand(values.get("minimaxSource") or os.path.join(ROOT, "minimax-h3-mlx")),
         "ltxPython": expand(values.get("ltxPython") or os.path.join(ROOT, "ltx", "bin", "python")),
         "files": expand(values.get("files") or os.path.join(ROOT, "files")),

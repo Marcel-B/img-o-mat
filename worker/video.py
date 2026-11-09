@@ -116,7 +116,7 @@ def minimax_command(request: dict, values: dict, output: str) -> list[str]:
         "--width", str(int(request["width"])), "--height", str(int(request["height"])),
     ]
     if request.get("lowRam"):
-        arguments.append("--low-ram")
+        arguments += ["--low-ram", "--streaming-source", values["minimaxStreamingSource"]]
     for image in request.get("images") or []:
         path = os.path.join(values["files"], image["file"])
         if not os.path.isfile(path):

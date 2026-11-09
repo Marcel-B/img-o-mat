@@ -41,6 +41,8 @@ LTX_COMMIT="747b30ef10e92a011e85b2aa0f6c4ee86ced5218"
 LTX_GIT="git+https://github.com/dgrauet/ltx-2-mlx@$LTX_COMMIT"
 # The H3 port has no installable package; retain its CLI and modules at this exact revision.
 MINIMAX_COMMIT="b2f7e4d2b7861cefe68b75e4b59ab81cc4e7c318"
+# Sampling-only fork with one-block residency; encoder/VAEs retain PipeNetwork's pinned implementation.
+MINIMAX_STREAM_COMMIT="3fcc9f8c557cf353400b1acf737b985e524a509f"
 
 BASE=""
 if ! command -v uv >/dev/null 2>&1; then
@@ -94,6 +96,13 @@ git -C "$ROOT/minimax-h3-mlx" fetch origin "$MINIMAX_COMMIT"
 git -C "$ROOT/minimax-h3-mlx" checkout --detach "$MINIMAX_COMMIT"
 install "$ROOT/minimax/bin/python" -r "$ROOT/minimax-h3-mlx/requirements.txt" "mlx==0.32.4" "mlx-vlm==0.7.12" "$PILLOW"
 PYTHONPATH="$ROOT/minimax-h3-mlx" "$ROOT/minimax/bin/python" -c 'from minimax_h3_mlx.pipeline import MiniMaxH3Pipeline; from mlx_vlm.models.qwen3_vl.language import Qwen3VLModel; from transformers import AutoTokenizer, AutoProcessor; from PIL import Image; import huggingface_hub; print("minimax-h3-mlx bereit")'
+
+if [ ! -d "$ROOT/minimax-h3-streaming/.git" ]; then
+  git clone https://github.com/Argus-AiTeam/minimax-h3-mac.git "$ROOT/minimax-h3-streaming"
+fi
+git -C "$ROOT/minimax-h3-streaming" fetch origin "$MINIMAX_STREAM_COMMIT"
+git -C "$ROOT/minimax-h3-streaming" checkout --detach "$MINIMAX_STREAM_COMMIT"
+PYTHONPATH="$ROOT/minimax-h3-streaming" "$ROOT/minimax/bin/python" -c 'from minimax_h3_mlx.streaming import load_streaming_dit; from minimax_h3_mlx.pipeline import MiniMaxH3Pipeline; print("MiniMax-Blockstreaming bereit")'
 
 cp "$HERE"/worker/*.py "$ROOT/worker/"
 if [ ! -f "$ROOT/worker.json" ]; then

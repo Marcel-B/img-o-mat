@@ -1335,7 +1335,7 @@ function renderVideoModels() {
       }
     } catch {}
     $('videoHelp').textContent = h3 && picked.lowRam
-      ? 'Powered by MiniMax H3. Experimenteller 32-GB-Modus: 5 Sekunden bei 768 × 768. Die Komponenten werden nacheinander geladen. Vollständiger Lauf und Speicherbedarf auf oi-o-mat sind noch zu prüfen. Rechne mit Stunden.'
+      ? 'Powered by MiniMax H3. Experimenteller 32-GB-Modus: 5 Sekunden bei 768 × 768. Die Komponenten werden nacheinander, das Videomodell blockweise geladen. Vollständiger Lauf und Speicherbedarf auf oi-o-mat sind noch zu prüfen. Rechne mit Stunden.'
       : h3
       ? 'Powered by MiniMax H3. Video mit synchronem Ton, 5 bis 15 Sekunden. Rechne mit Stunden, auch auf einem Ultra. Die vollständige Pipeline braucht vorerst mindestens 64 GB RAM (geschätzt); Transformer und Textencoder sind in 4 Bit. Start- und Endbilder sind im MLX-Port noch nicht durchgehend erprobt.'
       : 'Ein kurzer Clip mit LTX-2.3. Bilder am Anfang und Ende geben die Bewegung vor. Rechne mit 5 bis 20 Minuten.';
