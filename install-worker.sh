@@ -95,7 +95,7 @@ fi
 git -C "$ROOT/minimax-h3-mlx" fetch origin "$MINIMAX_COMMIT"
 git -C "$ROOT/minimax-h3-mlx" checkout --detach "$MINIMAX_COMMIT"
 install "$ROOT/minimax/bin/python" -r "$ROOT/minimax-h3-mlx/requirements.txt" "mlx==0.32.4" "mlx-vlm==0.7.12" "$PILLOW"
-PYTHONPATH="$ROOT/minimax-h3-mlx" "$ROOT/minimax/bin/python" -c 'from minimax_h3_mlx.pipeline import MiniMaxH3Pipeline; from mlx_vlm.models.qwen3_vl.language import Qwen3VLModel; from transformers import AutoTokenizer, AutoProcessor; from PIL import Image; import huggingface_hub; print("minimax-h3-mlx bereit")'
+PYTHONPATH="$ROOT/minimax-h3-mlx" "$ROOT/minimax/bin/python" -c 'from minimax_h3_mlx.pipeline import MiniMaxH3Pipeline; from mlx_vlm.models.qwen3_vl.language import Qwen3VLModel; from transformers import AutoTokenizer, Qwen2VLImageProcessorPil; from PIL import Image; import huggingface_hub; p = Qwen2VLImageProcessorPil(); p(images=[Image.new("RGB", (64, 64))], return_tensors="np"); print("minimax-h3-mlx bereit")'
 
 if [ ! -d "$ROOT/minimax-h3-streaming/.git" ]; then
   git clone https://github.com/Argus-AiTeam/minimax-h3-mac.git "$ROOT/minimax-h3-streaming"

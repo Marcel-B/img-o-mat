@@ -13,6 +13,16 @@ import json
 from pathlib import Path
 import runpy
 import sys
+from types import SimpleNamespace
+
+
+def image_processor(model_dir: Path):
+    from transformers import Qwen2VLImageProcessorPil
+
+    # H3 only uses still images. AutoProcessor also constructs a video processor,
+    # which unnecessarily requires torch/torchvision in an otherwise MLX runner.
+    return SimpleNamespace(image_processor=Qwen2VLImageProcessorPil.from_pretrained(
+        str(model_dir.parent / "processor"), local_files_only=True))
 
 
 def encoder_weights(path: Path, load_vision: bool) -> dict:
@@ -77,6 +87,12 @@ def install_encoder(encoder_dir: Path):
         raise ValueError("H3 encoder geometry differs from the 50-layer Qwen3-VL-32B conditioner")
 
     class QuantizedEncoder(upstream.MiniMaxH3TextEncoder):
+        @property
+        def processor(self):
+            if self._processor is None:
+                self._processor = image_processor(self._model_dir)
+            return self._processor
+
         def _load_weights(self, model_dir, dtype, verbose):
             weights = encoder_weights(encoder_dir / "text_encoder.safetensors", self.vision is not None)
             for name, module in (("language", self.language), ("vision", self.vision)):

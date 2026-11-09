@@ -18,6 +18,7 @@ Out: "IMGOMAT " events like paint.py's, ending with
 from __future__ import annotations
 
 import base64
+from collections import deque
 import json
 import os
 import platform
@@ -59,6 +60,19 @@ def memory_gb() -> float:
         return int(out.stdout.strip()) / (1 << 30)
     except (OSError, ValueError, subprocess.SubprocessError):
         return 0.0
+
+
+def runner_error(lines) -> str | None:
+    lines = list(lines)
+    for index in range(len(lines) - 1, -1, -1):
+        line = lines[index]
+        if "CalledProcessError:" in line:
+            continue  # This only wraps the earlier failure of a low-memory phase.
+        if re.match(r"^(?:[\w.]*Error|[\w.]*Exception):", line):
+            if line.endswith(":") and index + 1 < len(lines):
+                return line + " " + lines[index + 1]
+            return line
+    return None
 
 
 def command(request: dict, values: dict, output: str) -> list[str]:
@@ -193,6 +207,7 @@ def main() -> int:
         process = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         bar, last = 0, -1.0
         peak_memory = None
+        diagnostics = deque(maxlen=80)
         pending = b""
         while True:
             chunk = process.stdout.read1(4096) if hasattr(process.stdout, "read1") else process.stdout.read(4096)
@@ -218,11 +233,17 @@ def main() -> int:
                         bar += 1
                     continue
                 print(line, flush=True)
+                diagnostics.append(line)
+        if pending.strip():
+            line = pending.decode("utf-8", errors="replace").strip()
+            print(line, flush=True)
+            diagnostics.append(line)
         code = process.wait()
         process.stdout.close()
         finished = time.perf_counter()
         if code != 0 or not os.path.exists(raw):
-            print(f"Error: {runner} endete mit {code} ohne Video.", flush=True)
+            cause = runner_error(diagnostics)
+            print(f"Error: {runner}: {cause}" if cause else f"Error: {runner} endete mit {code} ohne Video.", flush=True)
             return 1
         emit({"event": "stage", "stage": "saving", "fraction": 0.98})
         try:
