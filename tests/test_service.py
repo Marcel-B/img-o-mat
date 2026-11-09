@@ -39,7 +39,7 @@ class ServiceTest(unittest.TestCase):
     def setUpClass(cls):
         cls.root = tempfile.mkdtemp(prefix="img-o-mat-test-")
         with open(os.path.join(cls.root, "worker.json"), "w") as out:
-            json.dump({"python": sys.executable, "flux3Python": sys.executable, "scripts": FAKE}, out)
+            json.dump({"python": sys.executable, "flux3Python": sys.executable, "ltxPython": sys.executable, "scripts": FAKE}, out)
         os.environ["IMG_O_MAT_SOURCE_WORKER"] = os.path.join(ROOT, "worker")
         # A Mac with 24 GB: Krea 2 and FLUX 3 are not offered.
         config = settings.Config({"root": cls.root, "listen": "127.0.0.1", "port": 0, "systemMemoryGb": 24, "minFreeGb": 0})
@@ -356,7 +356,9 @@ class ServiceTest(unittest.TestCase):
         status, videos, _ = self.call("GET", "/v1/models?kind=video&fresh=1")
         self.assertEqual(status, 200)
         ltx = next(m for m in videos["data"] if m["id"] == "ltx-2.3")
-        self.assertEqual((ltx["kind"], ltx["paints"], ltx["downloaded"]), ("video", False, False))
+        self.assertEqual((ltx["kind"], ltx["paints"], ltx["downloaded"]), ("video", True, False))
+        wan = next(m for m in videos["data"] if m["id"] == "wan-2.2-ti2v-5b")
+        self.assertEqual((wan["paints"], wan["ready"]), (False, False))
         # This Mac has 24 GB; the runner not being installed is no reason, nothing paints videos yet.
         self.assertIn("32 GB", ltx["unavailable"])
         status, body, _ = self.paint(model="ltx-2.3")
@@ -533,7 +535,7 @@ class SshTest(unittest.TestCase):
         self.root = tempfile.mkdtemp(prefix="img-o-mat-front-")
         self.remote = tempfile.mkdtemp(prefix="img-o-mat-worker-")
         with open(os.path.join(self.remote, "worker.json"), "w") as out:
-            json.dump({"python": sys.executable, "flux3Python": sys.executable, "scripts": FAKE}, out)
+            json.dump({"python": sys.executable, "flux3Python": sys.executable, "ltxPython": sys.executable, "scripts": FAKE}, out)
         self.environment = dict(os.environ)
         os.environ["IMG_O_MAT_SOURCE_WORKER"] = os.path.join(ROOT, "worker")
         os.environ["IMG_O_MAT_WORKER_ROOT"] = self.remote
@@ -557,6 +559,22 @@ class SshTest(unittest.TestCase):
         self.assertIsNone(job.error, job.error)
         self.assertEqual(len(job.results), 1)
         self.assertTrue(os.path.exists(os.path.join(self.remote, "files", info["sha256"])))
+
+    def test_makes_a_clip_over_ssh(self):
+        for repo in ("dgrauet/ltx-2.3-mlx-q8", "mlx-community/gemma-3-12b-it-4bit"):
+            os.makedirs(os.path.join(self.remote, "models", "hub", "models--" + repo.replace("/", "--"), "snapshots"))
+        service = server.Service(settings.Config({"root": self.root, "worker": {"ssh": "marcel@oi-o-mat"}, "systemMemoryGb": 32}))
+        picture = os.path.join(self.root, "card.jpg")
+        with open(picture, "wb") as out:
+            out.write(b"\xff\xd8\xff\xe0 card")
+        digest = hashlib.sha256(b"\xff\xd8\xff\xe0 card").hexdigest()
+        service.files.use = lambda d: picture
+        job = service.video_job_from({"model": "ltx-2.3", "prompt": "she turns", "images": [{"file": digest, "at": "last"}]}, "test", 0)
+        service.painter.submit(job)
+        list(job.events(timeout=1))
+        self.assertIsNone(job.error, job.error)
+        self.assertEqual(job.results[0]["mp4"][4:8], b"ftyp")
+        self.assertTrue(os.path.exists(os.path.join(self.remote, "files", digest)))
 
     def test_keeps_pictures_on_the_worker(self):
         job = self.service.job_from({"model": "klein-4b", "prompt": "a fox"}, "test", 0)
@@ -599,3 +617,125 @@ class SshTest(unittest.TestCase):
             [os.path.join(FAKE, "bin", "ssh"), "marcel@oi-o-mat", "img-o-mat rm -rf /"], capture_output=True, text=True)
         self.assertEqual(out.returncode, 2)
         self.assertIn("Aufruf", out.stderr)
+
+
+class VideoTest(unittest.TestCase):
+    """Clips with LTX-2.3 on a 32 GB Mac: only once downloaded, through the same line as the pictures, with a first
+    and a last picture; Tonwerk's model list stays without them."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = tempfile.mkdtemp(prefix="img-o-mat-video-")
+        with open(os.path.join(cls.root, "worker.json"), "w") as out:
+            json.dump({"python": sys.executable, "flux3Python": sys.executable, "ltxPython": sys.executable, "scripts": FAKE}, out)
+        os.environ["IMG_O_MAT_SOURCE_WORKER"] = os.path.join(ROOT, "worker")
+        config = settings.Config({"root": cls.root, "listen": "127.0.0.1", "port": 0, "systemMemoryGb": 32, "minFreeGb": 0})
+        cls.service = server.Service(config)
+        server.Handler.service = cls.service
+        cls.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        cls.httpd.daemon_threads = True
+        cls.port = cls.httpd.server_address[1]
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def setUp(self):
+        # ServiceTest swaps the class-wide service; this class's server must answer with its own.
+        server.Handler.service = self.service
+
+    call = ServiceTest.call
+
+    def ltx(self):
+        _, videos, _ = self.call("GET", "/v1/models?kind=video&fresh=1")
+        return next(m for m in videos["data"] if m["id"] == "ltx-2.3")
+
+    def download(self):
+        # As the download button leaves them (fake fetch.py); 81 GB do not fit the test machine's free space check.
+        for repo in ("dgrauet/ltx-2.3-mlx-q8", "mlx-community/gemma-3-12b-it-4bit"):
+            os.makedirs(os.path.join(self.root, "models", "hub", "models--" + repo.replace("/", "--"), "snapshots"), exist_ok=True)
+        self.service.link.forget_probe()
+
+    def upload(self, data: bytes) -> str:
+        status, body, _ = self.call("POST", "/v1/files", raw=data, headers={"content-type": "image/jpeg"})
+        self.assertIn(status, (200, 201), body)
+        return body["sha256"]
+
+    def video(self, **body):
+        return self.call("POST", "/v1/videos/generations", {"model": "ltx-2.3", "prompt": "she turns her head", **body},
+                         {"X-Llm-App": "img-o-mat"})
+
+    def test_a_00_clip_waits_for_the_download(self):
+        model = self.ltx()
+        self.assertTrue((model["available"], model["ready"], model["paints"]) == (True, True, True), model)
+        status, body, _ = self.video()
+        self.assertEqual(status, 409, body)
+        self.assertIn("noch nicht heruntergeladen", body["error"]["message"])
+
+    def test_makes_a_clip_from_a_first_and_a_last_picture(self):
+        self.download()
+        first, last = self.upload(b"\xff\xd8\xff\xe0 first"), self.upload(b"\xff\xd8\xff\xe0 last")
+        status, text, response = self.video(stream=True, seed=7, size="768x768", frames=97, quality="fast",
+                                            images=[{"file": first, "at": "first"}, {"file": last, "at": "last"}])
+        self.assertEqual(status, 200)
+        events = [block.split("\n") for block in text.decode().strip().split("\n\n")]
+        names = [lines[0].removeprefix("event: ") for lines in events]
+        self.assertEqual(names[-2:], ["video", "done"], names)
+        clip = json.loads(events[-2][1].removeprefix("data: "))
+        self.assertEqual(base64.b64decode(clip["b64_mp4"])[4:8], b"ftyp")
+        self.assertEqual(clip["seed"], 7)
+        with open(os.path.join(self.root, "last-video.json")) as file:
+            asked = json.load(file)
+        self.assertEqual((asked["model"], asked["textEncoder"]), ("dgrauet/ltx-2.3-mlx-q8", "mlx-community/gemma-3-12b-it-4bit"))
+        self.assertEqual((asked["width"], asked["height"], asked["frames"], asked["fps"], asked["quality"]), (768, 768, 97, 24, "fast"))
+        self.assertEqual([(i["file"], i["at"]) for i in asked["images"]], [(first, "first"), (last, "last")])
+        # Tonwerk's list and the picture route know nothing of it.
+        _, listed, _ = self.call("GET", "/v1/models")
+        self.assertNotIn("ltx-2.3", {m["id"] for m in listed["data"]})
+
+    def test_a_plain_request_gets_the_clip_and_a_broken_one_says_why(self):
+        self.download()
+        status, body, _ = self.video()
+        self.assertEqual(status, 200, body)
+        self.assertTrue(body["data"][0]["b64_mp4"])
+        status, body, _ = self.video(prompt="please fail")
+        self.assertEqual(status, 500)
+        self.assertIn("ohne Video", body["error"]["message"])
+
+    def test_checks_what_ltx_takes(self):
+        self.download()
+        for asked, part in (({"frames": 100}, "8·k+1"), ({"size": "1000x768"}, "durch 64"), ({"quality": "best"}, "quality"),
+                            ({"images": [{"file": "a" * 64}, {"file": "b" * 64}]}, "ein Bild am Anfang"),
+                            ({"model": "wan-2.2-ti2v-5b"}, "Unbekanntes Videomodell")):
+            status, body, _ = self.video(**asked)
+            self.assertEqual(status, 400, (asked, body))
+            self.assertIn(part, body["error"]["message"])
+
+    def test_the_worker_builds_the_ltx_command(self):
+        sys.path.insert(0, os.path.join(ROOT, "worker"))
+        import video
+        saved = video.snapshot, video.memory_gb
+        video.snapshot = lambda repo: f"/cache/{repo}"
+        video.memory_gb = lambda: 32.0
+        work = tempfile.mkdtemp()
+        files = os.path.join(work, "files")
+        os.makedirs(files)
+        for name in ("a" * 64, "b" * 64):
+            open(os.path.join(files, name), "wb").close()
+        try:
+            arguments = video.command({"model": "m", "textEncoder": "g", "prompt": "p", "seed": 1, "width": 768,
+                                       "height": 512, "frames": 49, "fps": 24, "quality": "high", "audio": False,
+                                       "images": [{"file": "a" * 64, "at": "first"}, {"file": "b" * 64, "at": "last", "strength": 0.8}]},
+                                      {"files": files}, os.path.join(work, "clip.mp4"))
+        finally:
+            video.snapshot, video.memory_gb = saved
+        text = " ".join(arguments)
+        for part in ("--model /cache/m", "--gemma /cache/g", "--two-stage", "--frames 49", "--frame-rate 24", "--low-ram", "--no-audio"):
+            self.assertIn(part, text)
+        images = [arguments[i + 1:i + 5] for i, a in enumerate(arguments) if a == "--image"]
+        self.assertEqual([i[1:] for i in images], [["0", "1.0", "--image"], ["last", "0.8", "guide"]])
+        self.assertTrue(all(os.path.islink(i[0]) and i[0].endswith(".jpg") for i in images))
+        shutil.rmtree(work, ignore_errors=True)

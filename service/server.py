@@ -11,6 +11,7 @@ The API, OpenAI's images API where it has one (README, "Schnittstelle"):
     GET    /v1/models                       the models, with what the Mac that paints can do
     GET    /v1/models?kind=video            the video models, which can only be downloaded for now
     POST   /v1/models/<id>/download         start downloading one (image or video) on the Mac that paints
+    POST   /v1/videos/generations           a video clip (LTX-2.3), from a prompt and a first and/or last picture
     POST   /v1/images/generations           paint; "stream": true for progress as server-sent events
     DELETE /v1/jobs/<id>                    cancel a picture
     HEAD   /v1/files/<sha256>, PUT ...      reference pictures (and LoRAs not in the library), once per file
@@ -42,7 +43,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config as settings  # noqa: E402
-from catalogue import Catalogue, max_references, takes_loras, takes_start_image  # noqa: E402
+from catalogue import Catalogue, makes_videos, max_references, takes_loras, takes_start_image  # noqa: E402
 from downloads import Downloads  # noqa: E402
 from files import FileError, Files  # noqa: E402
 from gallery import Gallery, GalleryError  # noqa: E402
@@ -60,6 +61,10 @@ MAX_GALLERY_BODY = 24 << 20
 # A reference picture the page sends; it shrinks them to about a megapixel first, a photo straight off a phone fits too.
 MAX_PICTURE_BYTES = 32 << 20
 ROLES = ("style", "figure", "place", "start")
+# LTX takes 8k+1 frames at 24 per second; longer clips need more memory than 32 GB hold.
+VIDEO_FPS = 24
+MAX_VIDEO_FRAMES = 121
+VIDEO_QUALITIES = ("fast", "high")
 UI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui.html")
 # Tonwerk-AI waits for a cover it asked for; other apps through the gate come after it.
 DEFAULT_PRIORITY = 50
@@ -79,7 +84,7 @@ ROUTES = (
     ("/v1/gallery/ref/<sha256>", re.compile(r"/v1/gallery/ref/[^/]+")),
     ("/v1/gallery/<name>", re.compile(r"/v1/gallery/[^/]+")),
 )
-KNOWN_ROUTES = {"/", "/v1/models", "/v1/images/generations", "/v1/busy", "/v1/files", "/v1/loras", "/v1/gallery", "/status",
+KNOWN_ROUTES = {"/", "/v1/models", "/v1/images/generations", "/v1/videos/generations", "/v1/busy", "/v1/files", "/v1/loras", "/v1/gallery", "/status",
                 "/metrics"}
 
 shipper: LokiShipper | None = None
@@ -180,7 +185,7 @@ class Service:
         """What paints now, for Tonwerk before it claims the Mac's memory: pictures that came through the gate are
         invisible to it otherwise. No probe, so it is cheap enough to ask before every claim."""
         running = self.painter.status()["running"]
-        model = self.catalogue.find(running["model"]) if running else None
+        model = (self.catalogue.find(running["model"]) or self.catalogue.find_video(running["model"])) if running else None
         return {
             "busy": running is not None,
             "app": running["app"] if running else None,
@@ -282,6 +287,56 @@ class Service:
         self.jobs[job.id] = job
         return job
 
+    def video_job_from(self, body: dict, app: str, priority: int) -> Job:
+        """A clip: prompt, size, length and up to two pictures, the first frame and/or the last."""
+        model = self.catalogue.find_video(str(body.get("model") or ""))
+        if model is None or not makes_videos(model):
+            known = ", ".join(m["id"] for m in self.catalogue.videos if makes_videos(m))
+            raise RequestError(400, f"Unbekanntes Videomodell {body.get('model')!r}; es gibt {known or 'keines'}.")
+        probe = self.probe()
+        if reason := self.catalogue.unavailable(model, probe, self.link.probe_error):
+            raise RequestError(501, reason)
+        if not self.catalogue.downloaded(model, probe):
+            raise RequestError(409, f"{model['label']} ist noch nicht heruntergeladen; unter Modelle → Videos laden.")
+        prompt = str(body.get("prompt") or "").strip()
+        if not prompt:
+            raise RequestError(400, "Der Prompt fehlt.")
+        if len(prompt) > MAX_PROMPT:
+            raise RequestError(400, f"Der Prompt ist länger als {MAX_PROMPT} Zeichen.")
+        match = re.fullmatch(r"(\d{3,4})x(\d{3,4})", str(body.get("size") or "768x768"))
+        width, height = (int(match[1]), int(match[2])) if match else (0, 0)
+        # Stage one runs at half the size on a 32-pixel grid.
+        if not (256 <= width <= 1280 and 256 <= height <= 1280 and width % 64 == 0 and height % 64 == 0):
+            raise RequestError(400, "size ist BreitexHöhe, je 256 bis 1280 und durch 64 teilbar.")
+        frames = int(body.get("frames") or 97)
+        if not (9 <= frames <= MAX_VIDEO_FRAMES and (frames - 1) % 8 == 0):
+            raise RequestError(400, f"frames geht von 9 bis {MAX_VIDEO_FRAMES} und ist 8·k+1 (49 = 2 s, 97 = 4 s, 121 = 5 s).")
+        quality = str(body.get("quality") or "fast")
+        if quality not in VIDEO_QUALITIES:
+            raise RequestError(400, f"quality ist {' oder '.join(VIDEO_QUALITIES)}.")
+        seed = body.get("seed")
+        seed = random.randrange(1 << 31) if seed is None else int(seed)
+        files: dict[str, str] = {}
+        images = []
+        asked = body.get("images") or []
+        places = [image.get("at") or "first" for image in asked]
+        if any(at not in ("first", "last") for at in places) or len(set(places)) < len(places):
+            raise RequestError(400, "Höchstens ein Bild am Anfang (at: first) und eins am Ende (at: last).")
+        for image, at in zip(asked, places):
+            digest = str(image.get("file") or "")
+            files[digest] = self.files_use(digest)
+            strength = image.get("strength")
+            images.append({"file": digest, "at": at, "strength": 1.0 if strength is None else max(0.1, min(float(strength), 1.0))})
+        request = {
+            "kind": "video", "prompt": prompt, "width": width, "height": height, "frames": frames, "fps": VIDEO_FPS,
+            "quality": quality, "audio": body.get("audio") is not False, "seed": seed, "images": images, "files": files,
+            "creator": str(body.get("creator") or "")[:60] or None,
+            "notify": body.get("notify") is not False,
+        }
+        job = Job(model, request, app, priority)
+        self.jobs[job.id] = job
+        return job
+
     def keep(self, body: dict, app: str) -> dict:
         """A picture the page shows, into the gallery. The page sends it back as it got it (the service keeps no
         picture after painting), with what it knows about it."""
@@ -323,6 +378,13 @@ class RequestError(Exception):
 
 
 def answer_of(job: Job) -> dict:
+    if job.request.get("kind") == "video":
+        return {
+            "created": int(job.created),
+            "model": job.model["id"],
+            "data": [{"b64_mp4": base64.b64encode(r["mp4"]).decode("ascii"), "seed": r["seed"],
+                      "paintSeconds": r["paintSeconds"]} for r in job.results],
+        }
     return {
         "created": int(job.created),
         "model": job.model["id"],
@@ -507,6 +569,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/v1/images/generations":
             self.generate(self.read_json())
             return
+        if path == "/v1/videos/generations":
+            self.generate(self.read_json(), video=True)
+            return
         if path == "/v1/gallery":
             saved = service.keep(self.read_json(MAX_GALLERY_BODY), self.app())
             self.send_json(201 if saved["created"] else 200, saved)
@@ -592,9 +657,9 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- painting --------------------------------------------------------------------------------------------------
 
-    def generate(self, body: dict) -> None:
+    def generate(self, body: dict, video: bool = False) -> None:
         service = self.service
-        job = service.job_from(body, self.app(), self.priority())
+        job = (service.video_job_from if video else service.job_from)(body, self.app(), self.priority())
         service.painter.submit(job)
         if body.get("stream"):
             self.stream(job)
@@ -638,7 +703,10 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 quiet = time.time()
                 kind = event.pop("event")
-                if kind == "image":
+                if kind == "video":
+                    send("video", {"index": 0, "b64_mp4": base64.b64encode(event["mp4"]).decode("ascii"),
+                                   "seed": event["seed"], "paintSeconds": event["paintSeconds"]})
+                elif kind == "image":
                     result = event
                     send("image", {"index": result["index"], "b64_json": base64.b64encode(result["jpeg"]).decode("ascii"),
                                    "revised_prompt": result["revisedPrompt"], "seed": result["seed"],

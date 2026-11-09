@@ -2,7 +2,8 @@
 Hugging Face token. install.sh --worker copies this folder to <root>/worker/ and writes <root>/worker.json:
 
     {"modelCache": "/Volumes/T7/...", "tokenFile": "~/.config/tonwerk/huggingface.token",
-     "python": "<root>/env/bin/python", "flux3Python": "<root>/flux3/bin/python", "gallery": "/Volumes/T7/..."}
+     "python": "<root>/env/bin/python", "flux3Python": "<root>/flux3/bin/python", "ltxPython": "<root>/ltx/bin/python",
+     "gallery": "/Volumes/T7/..."}
 
 Without "gallery" the kept pictures go on the disk the models are on (img-o-mat/galerie at its top), else <root>/gallery.
 
@@ -52,6 +53,7 @@ def settings() -> dict:
         ],
         "python": expand(values.get("python") or os.path.join(ROOT, "env", "bin", "python")),
         "flux3Python": expand(values.get("flux3Python") or os.path.join(ROOT, "flux3", "bin", "python")),
+        "ltxPython": expand(values.get("ltxPython") or os.path.join(ROOT, "ltx", "bin", "python")),
         "files": expand(values.get("files") or os.path.join(ROOT, "files")),
         "gallery": gallery,
         "galleryDisk": volume_of(gallery),

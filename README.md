@@ -24,7 +24,7 @@ Die Bildmodelle von oi-o-mat als Dienst für alle Apps: FLUX.2 Klein 4B und 9B, 
    ```sh
    ./install-worker.sh
    ```
-   Das legt die beiden Python-Umgebungen (mflux 0.23.0, flux3-mlx 0.1.0, so gepinnt wie bisher in Tonwerk) unter `~/Library/Application Support/img-o-mat` an und schreibt `worker.json`. Gibt es Tonwerks Modell-Cache, zeigt `worker.json` darauf, dann wird nichts neu heruntergeladen. „Entfernte Anmeldung“ muss in den Systemeinstellungen an sein.
+   Das legt die drei Python-Umgebungen (mflux 0.23.0, flux3-mlx 0.1.0, so gepinnt wie bisher in Tonwerk, und ltx-2-mlx 0.18.0 für Videos, aus GitHub auf einem festen Commit, braucht Python 3.11 über `uv` und `brew install ffmpeg`) unter `~/Library/Application Support/img-o-mat` an und schreibt `worker.json`. Gibt es Tonwerks Modell-Cache, zeigt `worker.json` darauf, dann wird nichts neu heruntergeladen. „Entfernte Anmeldung“ muss in den Systemeinstellungen an sein.
 2. **Ebenfalls auf oi-o-mat:**
    ```sh
    deploy/to-proxmox.sh
@@ -71,7 +71,8 @@ Reines HTML, CSS und JavaScript in einer Datei (`service/ui.html`), ohne Framewo
 - **Galerie:** Die gespeicherten Bilder, das neueste zuerst, als kleine Vorschau. Ein Klick öffnet die große Vorschau mit Herunterladen und Löschen (löscht das Bild auf der T7). Darunter steht, womit es gemalt wurde: Prompt (bei FLUX 3 auch, was der Upsampler daraus gemacht hat), Modell, Größe, Seed, die LoRAs mit ihrer Stärke und die Vorlagen als kleine Bilder. Übernehmen trägt das alles wieder in die Malen-Felder ein, auch die Vorlagen; so malt man ein Bild noch einmal oder ändert nur eine Sache. Dasselbe zeigt die Vorschau eines frisch gemalten Bildes. Die kleinen Vorschauen macht `sips` auf oi-o-mat beim Speichern, der Dienst hebt sie auf, damit die Galerie schnell aufgeht.
 - **Warteschlange:** Was gerade malt und wer wartet, auch Anfragen anderer Apps.
 - **Modelle:** Lizenz, ob kommerziell nutzbar, Speicher, ob heruntergeladen, und ein Knopf zum Herunterladen (15 bis 35 GB auf die T7; er prüft vorher den Platz). Nie von selbst.
-- **Videos** (unter Modelle): LTX-2.3 in 8 Bit (für ltx-2-mlx, 81 GB mit dem Textencoder Gemma 3 12B) und Wan 2.2 TI2V 5B in 8 Bit (für rapid-mlx, 20 GB, auf dem Stand, den rapid-mlx 1.0.2 festlegt). Sie lassen sich vorerst nur auf die T7 laden, gemalt wird mit ihnen noch nicht, und sie stehen weder im Malen-Formular noch in `GET /v1/models`, Tonwerk sieht sie also nicht. Beide brauchen einen Mac mit 32 GB.
+- **Video:** Ein kurzer Clip (2, 4 oder 5 Sekunden, 24 Bilder pro Sekunde, wahlweise mit Ton) mit LTX-2.3 über ltx-2-mlx. Dazu kommen ein Prompt, was passiert, und bis zu zwei Bilder: Das Bild am **Anfang** ist genau das erste Bild des Clips, auf das Bild am **Ende** läuft der Clip zu (ltx-2-mlx' `--image … last … guide`). So endet ein Intro zum Beispiel genau auf einer Spielerkarte. Bilder kommen über „Bild wählen“, durch Hineinziehen oder mit „Für Video“ aus der großen Vorschau (auch aus der Galerie). „Schnell“ ist LTX' destillierter Weg (8 + 3 Schritte), „gut“ der zweistufige mit 30 Schritten. Ein Clip läuft durch dieselbe Warteschlange wie die Bilder, und auf einem Mac mit 32 GB streamt ltx-2-mlx die Gewichte von der Platte (`--low-ram`). Der fertige Clip bleibt nur auf der Seite; Herunterladen behält ihn. Er trägt in seinen MP4-Metadaten den Hinweis, dass er KI-generiert ist.
+- **Videos** (unter Modelle): LTX-2.3 in 8 Bit (81 GB mit dem Textencoder Gemma 3 12B) und Wan 2.2 TI2V 5B in 8 Bit (für rapid-mlx, 20 GB, auf dem Stand, den rapid-mlx 1.0.2 festlegt; damit gibt es noch keine Clips). Sie stehen weder im Malen-Formular noch in `GET /v1/models`, Tonwerk sieht sie also nicht. Beide brauchen einen Mac mit 32 GB.
 - **LoRAs:** Oben wählst du ein Modell. Darunter stehen die LoRAs, die für dieses Modell schon auf der Platte liegen (Name, Modell, Trigger und Stärke ändern, löschen), und die, die du von Hugging Face laden kannst (bisher nur Krea 2 Turbo, Krea hat für die anderen Modelle keine offiziellen). Eigene Dateien lädst du unten hoch; das Modell erkennt der Dienst meist aus der Datei, sonst gilt das oben gewählte.
 
 ## Schnittstelle
@@ -81,7 +82,8 @@ OpenAI-kompatibel, wo OpenAI etwas hat, also gehen auch dessen Clients. Fehler h
 | Aufruf | Wirkung |
 | --- | --- |
 | `GET /v1/models` | die Modelle mit `available`/`unavailable` (Grund), `downloaded`, `memoryGb`, `downloadGb`, `license`, `commercial`, `contentFilter`, `loras`, `references`, `startImage`, `lettering`; `?fresh=1` fragt oi-o-mat neu |
-| `GET /v1/models?kind=video` | die Videomodelle (`kind: "video"`, `paints: false`), nur zum Herunterladen |
+| `GET /v1/models?kind=video` | die Videomodelle (`kind: "video"`, `paints`, `ready`/`notReady`, `downloaded`) |
+| `POST /v1/videos/generations` | ein Clip: `model` (`ltx-2.3`), `prompt`, `size` (256 bis 1280, durch 64 teilbar, Standard 768x768), `frames` (8·k+1 bis 121, Standard 97 = 4 s), `quality` (`fast`/`high`), `audio`, `seed`, `images` (`[{"file": "<sha256>", "at": "first" \| "last"}]`, aus `/v1/files`), `stream`; Antwort `data[0].b64_mp4`, mit `stream` als SSE (`progress`, `video`, `done`) |
 | `POST /v1/models/<id>/download` | Download auf oi-o-mat starten (202), auch für ein Videomodell; Stand unter `download` im Modell |
 | `POST /v1/images/generations` | malen, siehe unten |
 | `DELETE /v1/jobs/<id>` | ein Bild abbrechen (die Kennung steht in `X-Img-Job`) |
@@ -135,6 +137,8 @@ Das Dashboard und das Ziel liegen im Monitoring-Stack (Tonwerk-AI, `deploy/monit
 Python 3.9 oder neuer, ohne Pakete. `python3 -m unittest discover tests` spielt den ganzen Weg gegen nachgestellte Maler (`tests/fake`) durch, lokal und über einen nachgestellten `ssh`, der wie der erzwungene Befehl arbeitet. Die echten Maler (`worker/paint.py`, `fetch.py`) brauchen einen Mac mit Apple Silicon.
 
 ## Was getestet ist
+
+Stand 2026-11-09: Clips laufen in den Tests gegen einen nachgestellten ltx-2-mlx (lokal und über den nachgestellten `ssh`, Bild am Anfang und am Ende, Prüfung der Werte, Fehler), der Aufruf, den `worker/video.py` baut, ist getestet, und der Reiter Video lief in Chromium auf Desktop- und Handybreite. Den echten ltx-2-mlx (Installation, Fortschritt aus seinen Balken, Speicher auf 32 GB, Dauer) hat noch kein Clip auf oi-o-mat gesehen.
 
 Stand 2026-11-09: Die Videomodelle laufen in den Tests (nicht in `GET /v1/models`, Download mit dem festgelegten Stand für Wan) und einmal in Chromium mit den nachgestellten Malern (Abschnitt Videos, Platzprüfung bei LTX). Ob die echten Repositories mit diesen Namen und Größen auf die T7 kommen, zeigt erst der erste Download auf oi-o-mat; die Größen stehen so auf Hugging Face, der Speicher ist geschätzt.
 

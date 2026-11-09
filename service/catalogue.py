@@ -4,9 +4,10 @@ Moved from Tonwerk-AI's Images/ImageModels.cs (2026-10-28) with the same ids, so
 naming their model. The list can be replaced in the configuration ("models"); an entry there takes the defaults' fields
 it leaves out.
 
-Video models (VIDEOS, replaced by "videos" in the configuration) are a list of their own: for now they can only be
-downloaded onto the T7, ahead of a runner that paints with them (Marcel's wish, 2026-11-09). They never show up in
-GET /v1/models or in a painting request, so Tonwerk and the other clients see nothing of them.
+Video models (VIDEOS, replaced by "videos" in the configuration) are a list of their own (Marcel's wish, 2026-11-09):
+downloaded onto the T7 by the same button, clips made through POST /v1/videos/generations (LTX-2.3 with ltx-2-mlx;
+Wan is only downloaded so far). They never show up in GET /v1/models or in a painting request, so Tonwerk and the other
+clients see nothing of them.
 """
 
 from __future__ import annotations
@@ -33,6 +34,8 @@ FIELDS = {
     "repo": "",
     # Further repositories its first picture downloads (FLUX 3's prompt upsampler).
     "moreRepos": [],
+    # A video model's text encoder, one of moreRepos (ltx-2-mlx takes it as --gemma).
+    "textEncoder": None,
     # Commits to download a repository at, where the runner itself asks for that one (rapid-mlx pins Wan's); others
     # take the newest, as the runners do.
     "revisions": {},
@@ -145,6 +148,7 @@ VIDEOS = [
         "repo": "dgrauet/ltx-2.3-mlx-q8",
         # The text encoder ltx-2-mlx loads for 2.3 packs; the pack does not bring it.
         "moreRepos": ["mlx-community/gemma-3-12b-it-4bit"],
+        "textEncoder": "mlx-community/gemma-3-12b-it-4bit",
         # ltx-2-mlx: int8 needs 32 GB, or 16 GB with --low-ram.
         "minSystemGb": 32,
         # The pack holds dev and distilled transformers and both upscalers (72 GB), the text encoder 8 GB.
@@ -192,6 +196,11 @@ def takes_start_image(model: dict) -> bool:
     return model["runner"] == MFLUX and model["model"].startswith(("z-image", "krea-2"))
 
 
+def makes_videos(model: dict) -> bool:
+    """Which video models have a runner behind them; Wan waits on the T7 for rapid-mlx."""
+    return model["runner"] == LTX
+
+
 def repos(model: dict) -> list[str]:
     extra = [FILTER_REPO] if model["contentFilter"] else []
     return [model["repo"], *model["moreRepos"], *extra]
@@ -214,8 +223,9 @@ class Catalogue:
     def all_repos(self) -> list[str]:
         return sorted({repo for model in self.models + self.videos for repo in repos(model)})
 
-    def unavailable(self, model: dict, probe: dict | None, probe_error: str | None) -> str | None:
-        """Why the Mac that paints cannot paint with the model; None when it can."""
+    def unavailable(self, model: dict, probe: dict | None, probe_error: str | None, runner: bool = True) -> str | None:
+        """Why the Mac that paints cannot paint with the model; None when it can. Without `runner`, only whether it
+        could hold the model (a video model can be downloaded before its runner is installed)."""
         if probe is None:
             return probe_error or "Der Mac, der malt, antwortet nicht."
         configured = self.config.get("systemMemoryGb")
@@ -223,8 +233,7 @@ class Catalogue:
         # Half a GB of slack: what the system reports can fall a little short of what the Mac is sold with.
         if model["minSystemGb"] and has is not None and has < model["minSystemGb"] - 0.5:
             return f"{model['label']} braucht einen Mac mit {model['minSystemGb']:.0f} GB, {probe.get('host') or 'dieser'} hat {has:.0f}."
-        if model in self.videos:
-            # Nothing paints videos yet; what is left to say is whether the Mac could hold one.
+        if not runner:
             return None
         if not (probe.get("runners") or {}).get(model["runner"]):
             return f"{model['runner']} ist auf {probe.get('host') or 'dem Mac'} nicht installiert; dort install.sh --worker ausführen."
@@ -237,9 +246,10 @@ class Catalogue:
         return all(have.get(repo) for repo in repos(model))
 
     def describe_video(self, model: dict, probe: dict | None, probe_error: str | None, download: dict | None = None) -> dict:
-        """An entry of GET /v1/models?kind=video: what the page needs to download it. "available" says only that this
-        Mac could hold it; painting with it comes later."""
-        reason = self.unavailable(model, probe, probe_error)
+        """An entry of GET /v1/models?kind=video: what the page needs to download it and make clips. "paints" says
+        whether img-o-mat has a runner for it; "available" whether this Mac can (for one without a runner: could hold it)."""
+        reason = self.unavailable(model, probe, probe_error, runner=False)
+        cannot = self.unavailable(model, probe, probe_error) if makes_videos(model) else "Dafür gibt es noch keinen Runner."
         return {
             "id": model["id"],
             "object": "model",
@@ -254,7 +264,10 @@ class Catalogue:
             "minSystemGb": model["minSystemGb"],
             "downloadGb": model["downloadGb"],
             "memoryGb": model["memoryGb"],
-            "paints": False,
+            "paints": makes_videos(model),
+            # Whether a clip can be made now (runner installed, model on the disk aside), and why not.
+            "ready": cannot is None,
+            "notReady": cannot,
             "downloaded": self.downloaded(model, probe),
             "download": download,
             "available": reason is None,

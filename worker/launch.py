@@ -1,6 +1,7 @@
 """The one command the service runs on the Mac that paints, over SSH (or as a child process where it paints itself):
 
     launch.py paint mflux     a picture, with that runner's Python
+    launch.py video           a video clip (video.py), with the ltx environment's Python
     launch.py fetch           a model's download, with mflux's Python
     launch.py probe           what this Mac has
     launch.py receive <sha>   a file on stdin into the files folder
@@ -11,7 +12,7 @@ restrict,command="/usr/bin/python3 <root>/worker/launch.py --ssh"): sshd runs it
 what was asked in SSH_ORIGINAL_COMMAND, of which only the words above count. So the key opens nothing else on
 oi-o-mat, not even a shell.
 
-For paint and fetch it reads the first line of stdin (the request), hands it to the script and then keeps reading its
+For paint, video and fetch it reads the first line of stdin (the request), hands it to the script and then keeps reading its
 own stdin: when that ends (the service cancelled and closed SSH, or the connection broke) it kills the script and its
 children. Without that, a picture cut off over SSH would go on holding 20 GB until it next wrote a line. Plain
 Python 3.9, macOS's own.
@@ -31,7 +32,7 @@ import threading
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
 
-SCRIPTS = {"paint": "paint.py", "fetch": "fetch.py", "probe": "probe.py"}
+SCRIPTS = {"paint": "paint.py", "video": "video.py", "fetch": "fetch.py", "probe": "probe.py"}
 
 
 def receive(digest: str) -> int:
@@ -107,12 +108,15 @@ def main() -> int:
     if command == "probe":
         # Short and harmless; no watcher needed.
         return subprocess.call([sys.executable, os.path.join(common.HERE, SCRIPTS["probe"])])
+    if command == "video":
+        values = common.settings()
+        return run(SCRIPTS["video"], values["ltxPython"], values["scripts"])
     if command in ("paint", "fetch"):
         values = common.settings()
         runner = sys.argv[2] if len(sys.argv) > 2 else "mflux"
         python = values["flux3Python"] if runner == "flux3-mlx" else values["python"]
         return run(SCRIPTS[command], python, values["scripts"])
-    print("Aufruf: launch.py paint <runner> | fetch | probe | receive <sha256> | gallery ...", file=sys.stderr)
+    print("Aufruf: launch.py paint <runner> | video | fetch | probe | receive <sha256> | gallery ...", file=sys.stderr)
     return 2
 
 

@@ -1,4 +1,4 @@
-"""One picture at a time, each in its own process (worker/paint.py with the runner's Python, over SSH on the Mac
+"""One picture (or video clip) at a time, each in its own process (worker/paint.py with the runner's Python, over SSH on the Mac
 that paints), so the model and MLX's Metal cache leave the memory with the process. Waiting jobs go by priority, then by arrival: Tonwerk-AI asks with priority 0
 and goes before what other apps send through the gate."""
 
@@ -173,6 +173,12 @@ class Painter:
                 self.log(f"Nach dem Bild: {error!r}", "warning")
 
     def _paint(self, job: Job) -> None:
+        if job.request.get("kind") == "video":
+            # One clip a job; it goes through the same line as the pictures, since it needs the same memory.
+            result = self._paint_one(job, int(job.request["seed"]), 0, 1)
+            job.results.append(result)
+            job.emit({"event": "video", "index": 0, **result})
+            return
         count = int(job.request.get("n") or 1)
         for index in range(count):
             if job.cancelled:
@@ -192,7 +198,8 @@ class Painter:
                 raise PaintError(502, str(error))
             if job.cancelled:
                 raise Cancelled()
-        request = {
+        video = job.request.get("kind") == "video"
+        request = self._video_request(job, seed) if video else {
             "runner": model["runner"],
             "model": model["model"],
             "label": model["label"],
@@ -209,11 +216,11 @@ class Painter:
             "loras": job.request.get("loras") or [],
             "references": job.request.get("references") or [],
         }
-        self.log(f"{job.app}: male mit {model['id']} auf {self.link.name} ({index + 1}/{count}).")
+        self.log(f"{job.app}: {'filme' if video else 'male'} mit {model['id']} auf {self.link.name} ({index + 1}/{count}).")
         tail: deque[str] = deque(maxlen=TAIL_LINES)
         done: dict | None = None
         try:
-            process = self.link.start("paint", model["runner"])
+            process = self.link.start("video") if video else self.link.start("paint", model["runner"])
         except OSError as error:
             raise PaintError(500, f"Malen startet nicht: {error}")
         job.process = process
@@ -247,7 +254,7 @@ class Painter:
                     pass
         if job.cancelled:
             raise Cancelled()
-        if process.returncode != 0 or done is None or not done.get("jpeg"):
+        if process.returncode != 0 or done is None or not done.get("mp4" if video else "jpeg"):
             if process.returncode and process.returncode < 0 and time.time() - started >= self.config.timeout:
                 raise PaintError(504, f"Das Modell brauchte länger als {self.config.timeout / 60:.0f} Minuten.")
             status = filter_status(tail)
@@ -261,6 +268,14 @@ class Painter:
             raise PaintError(status, failure_message(tail))
         if self.metrics:
             self.metrics.paint.observe(time.time() - started, model=model["id"])
+        if video:
+            return {
+                "mp4": base64.b64decode(done["mp4"]),
+                "seed": seed,
+                "loadSeconds": done.get("loadSeconds"),
+                "paintSeconds": done.get("paintSeconds"),
+                "peakMemoryGb": done.get("peakMemoryGb"),
+            }
         return {
             "jpeg": base64.b64decode(done["jpeg"]),
             "seed": seed,
@@ -268,6 +283,27 @@ class Painter:
             "loadSeconds": done.get("loadSeconds"),
             "paintSeconds": done.get("paintSeconds"),
             "peakMemoryGb": done.get("peakMemoryGb"),
+        }
+
+    @staticmethod
+    def _video_request(job: Job, seed: int) -> dict:
+        """What worker/video.py reads; the service checked the values (server.video_job_from)."""
+        model, asked = job.model, job.request
+        return {
+            "runner": model["runner"],
+            "model": model["repo"],
+            "textEncoder": model["textEncoder"],
+            "label": model["label"],
+            "creator": asked.get("creator") or job.app,
+            "prompt": asked["prompt"],
+            "seed": seed,
+            "width": asked["width"],
+            "height": asked["height"],
+            "frames": asked["frames"],
+            "fps": asked["fps"],
+            "quality": asked["quality"],
+            "audio": asked["audio"],
+            "images": asked.get("images") or [],
         }
 
     def _worker_error(self, kind: str) -> None:
@@ -305,7 +341,7 @@ def failure_message(output) -> str:
     content filter); else the traceback's last line says what broke."""
     lines = [line.strip() for line in output if line.strip()]
     line = next((l for l in reversed(lines) if l.startswith("Error")), lines[-1] if lines else None)
-    return line.removeprefix("Error: ") if line else "Das Modell hat kein Bild gemalt."
+    return line.removeprefix("Error: ") if line else "Das Modell hat nichts geliefert."
 
 
 def filter_status(output) -> int:
