@@ -25,6 +25,33 @@ def image_processor(model_dir: Path):
         str(model_dir.parent / "processor"), local_files_only=True))
 
 
+def encode_images(encoder, prompt: str, images):
+    import mlx.core as mx
+    import numpy as np
+    from mlx_vlm.models.qwen3_vl.language import LanguageModel
+
+    input_ids, tags, (pixels, grid) = encoder.build_request(prompt, images)
+    if encoder.vision is None:
+        raise ValueError("H3 image conditioning requires the vision encoder")
+    grid = mx.array(grid.astype(np.int32))
+    features, deepstack = encoder.vision(mx.array(pixels).astype(encoder.dtype), grid, output_hidden_states=True)
+    embeds = encoder.language.embed_tokens(input_ids)
+    image_mask = input_ids == encoder.image_token_id
+    # The vision output has only image rows; text and image-boundary tokens stay intact.
+    positions = np.flatnonzero(np.asarray(image_mask).reshape(-1))
+    if features.shape != (len(positions), embeds.shape[-1]):
+        raise ValueError(f"H3 image features {features.shape} do not match {len(positions)} image tokens")
+    flattened = embeds.reshape(-1, embeds.shape[-1])
+    flattened[mx.array(positions, dtype=mx.uint32)] = features.astype(embeds.dtype)
+    embeds = flattened.reshape(embeds.shape)
+    position_ids, _ = LanguageModel.get_rope_index(
+        encoder, input_ids, image_grid_thw=grid, video_grid_thw=None, attention_mask=None)
+    hidden = encoder._hidden_states(input_ids, position_ids, inputs_embeds=embeds,
+                                   visual_pos_masks=image_mask, deepstack_visual_embeds=deepstack)
+    mx.eval(hidden)
+    return hidden, tags
+
+
 def encoder_weights(path: Path, load_vision: bool) -> dict:
     import mlx.core as mx
 
@@ -87,6 +114,11 @@ def install_encoder(encoder_dir: Path):
         raise ValueError("H3 encoder geometry differs from the 50-layer Qwen3-VL-32B conditioner")
 
     class QuantizedEncoder(upstream.MiniMaxH3TextEncoder):
+        def encode(self, prompt, images=None):
+            if images:
+                return encode_images(self, prompt, images)
+            return super().encode(prompt, images)
+
         @property
         def processor(self):
             if self._processor is None:
