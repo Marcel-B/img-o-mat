@@ -34,7 +34,7 @@ import common  # noqa: E402
 NAME = re.compile(r"\d{8}-\d{6}-[0-9a-f]{12}")
 THUMB_PIXELS = 512
 # What the service may store beside a picture; anything else in the request is dropped.
-META = {"model": 60, "prompt": 2000, "paintedPrompt": 4000, "size": 16, "app": 64, "creator": 60}
+META = {"model": 60, "prompt": 2000, "negativePrompt": 2000, "paintedPrompt": 4000, "size": 16, "app": 64, "creator": 60}
 MAX_LORAS = 3
 MAX_REFERENCES = 4
 ROLES = ("style", "figure", "place", "start")

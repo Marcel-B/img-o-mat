@@ -43,7 +43,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config as settings  # noqa: E402
-from catalogue import Catalogue, makes_videos, max_references, takes_loras, takes_start_image  # noqa: E402
+from catalogue import Catalogue, makes_videos, max_references, takes_loras, takes_negative_prompt, takes_start_image  # noqa: E402
 from downloads import Downloads  # noqa: E402
 from files import FileError, Files  # noqa: E402
 from gallery import Gallery, GalleryError  # noqa: E402
@@ -216,6 +216,12 @@ class Service:
             raise RequestError(400, "Der Prompt fehlt.")
         if len(prompt) > MAX_PROMPT:
             raise RequestError(400, f"Der Prompt ist länger als {MAX_PROMPT} Zeichen.")
+        # Not OpenAI's; refused rather than dropped where it would not act, so no client believes it was heeded.
+        negative = str(body.get("negative_prompt") or "").strip()
+        if negative and not takes_negative_prompt(model):
+            raise RequestError(400, f"{model['label']} kennt keinen Negativprompt (es malt ohne CFG).")
+        if len(negative) > MAX_PROMPT:
+            raise RequestError(400, f"Der Negativprompt ist länger als {MAX_PROMPT} Zeichen.")
         if body.get("response_format") not in (None, "b64_json"):
             raise RequestError(400, "Nur response_format b64_json; Bilder bleiben nicht auf dem Server.")
         n = int(body.get("n") or 1)
@@ -277,7 +283,7 @@ class Service:
             raise RequestError(400, f"{model['label']} nimmt {max_references(model) or 'keine'} Referenzbilder.")
 
         request = {
-            "prompt": prompt, "n": n, "width": width, "height": height, "seed": seed, "steps": steps,
+            "prompt": prompt, "negativePrompt": negative or None, "n": n, "width": width, "height": height, "seed": seed, "steps": steps,
             "loras": loras, "references": references, "files": files,
             "creator": str(body.get("creator") or "")[:60] or None,
             # Only an explicit false keeps Onkel Bummel quiet (notify.py); the config decides the rest.
@@ -368,7 +374,8 @@ class Service:
             raise RequestError(400, "b64_json fehlt.")
         seed = body.get("seed")
         meta = {
-            "model": body.get("model"), "prompt": body.get("prompt"), "paintedPrompt": body.get("paintedPrompt"),
+            "model": body.get("model"), "prompt": body.get("prompt"), "negativePrompt": body.get("negativePrompt"),
+            "paintedPrompt": body.get("paintedPrompt"),
             "size": body.get("size"), "seed": seed if isinstance(seed, int) else None, "app": app,
             "creator": body.get("creator"), "loras": body.get("loras"),
         }

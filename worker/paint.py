@@ -8,7 +8,7 @@ process, since MLX's Metal cache only goes with it.
 In: one JSON object on stdin
     {"runner": "mflux" | "flux3-mlx", "model": "flux2-klein-4b", "label": "FLUX.2 Klein 4B", "creator": "Tonwerk-AI",
      "quantize": 8 | null, "steps": 4, "upsampler": "4bit" | null, "contentFilter": false, "prompt": "...",
-     "seed": 42, "width": 1024, "height": 1024,
+     "negativePrompt": "..." | null, "guidance": 2.0 | null, "seed": 42, "width": 1024, "height": 1024,
      "loras": [{"file": "<sha256>", "strength": 1.0}],
      "references": [{"file": "<sha256>", "role": "style" | "figure" | "place" | "start", "strength": 0.5 | null}]}
     Files are named by their SHA-256 in the worker's files folder, where the service copied them. References are
@@ -144,6 +144,11 @@ def paint_mflux(model, request: dict, steps: int):
     # Distilled Klein and Krea 2 Turbo sample at guidance 1; Z-Image Turbo takes none and picks its own.
     if not request["model"].startswith("z-image"):
         arguments["guidance"] = 1.0
+    # Krea 2 encodes the negative branch only at a guidance other than 1 (true CFG, two passes a step); the service
+    # sends both together and only for Krea 2 (catalogue.takes_negative_prompt).
+    if request.get("negativePrompt") and request["model"].startswith("krea-2"):
+        arguments["negative_prompt"] = request["negativePrompt"]
+        arguments["guidance"] = float(request.get("guidance") or 2.0)
     if looked_at(request):
         arguments["image_paths"] = looked_at(request)
     elif start := start_picture(request):
