@@ -110,7 +110,9 @@ def main() -> int:
         return subprocess.call([sys.executable, os.path.join(common.HERE, SCRIPTS["probe"])])
     if command == "video":
         values = common.settings()
-        return run(SCRIPTS["video"], values["ltxPython"], values["scripts"])
+        runner = sys.argv[2] if len(sys.argv) > 2 else "ltx-2-mlx"
+        python = values["minimaxPython"] if runner == "minimax-h3-mlx" else values["ltxPython"]
+        return run(SCRIPTS["video"], python, values["scripts"])
     if command in ("paint", "fetch"):
         values = common.settings()
         runner = sys.argv[2] if len(sys.argv) > 2 else "mflux"

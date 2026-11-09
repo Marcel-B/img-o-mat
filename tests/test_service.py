@@ -5,6 +5,8 @@ LoRAs, downloads and cancelling. The worker runs locally here; over SSH it is th
 """
 
 import base64
+import contextlib
+import io
 import hashlib
 import http.client
 import json
@@ -17,6 +19,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -748,6 +751,152 @@ class VideoTest(unittest.TestCase):
             status, body, _ = self.video(**asked)
             self.assertEqual(status, 400, (asked, body))
             self.assertIn(part, body["error"]["message"])
+
+    def prepare_minimax(self):
+        self.service.config["systemMemoryGb"] = 96
+        self.addCleanup(self.service.config.__setitem__, "systemMemoryGb", 32)
+        config_file = os.path.join(self.root, "worker.json")
+        with open(config_file) as file:
+            original = json.load(file)
+        with open(config_file, "w") as file:
+            json.dump({**original, "minimaxPython": sys.executable}, file)
+        def restore_worker():
+            with open(config_file, "w") as file:
+                json.dump(original, file)
+            self.service.link.forget_probe()
+        self.addCleanup(restore_worker)
+        scripts = os.path.join(self.root, "minimax-h3-mlx", "scripts")
+        os.makedirs(scripts, exist_ok=True)
+        with open(os.path.join(scripts, "generate.py"), "w") as file:
+            file.write("# fake installation")
+        model = self.service.catalogue.find_video("minimax-h3-mlx-4bit")
+        for repo in (model["repo"], model["checkpoint"]):
+            os.makedirs(os.path.join(self.root, "models", "hub", "models--" + repo.replace("/", "--"), "snapshots"), exist_ok=True)
+        self.service.link.forget_probe()
+        return model
+
+    def test_minimax_clip_uses_its_runner_and_keyframes(self):
+        self.prepare_minimax()
+        first, last = self.upload(b"\xff\xd8\xff\xe0 h3 first"), self.upload(b"\xff\xd8\xff\xe0 h3 last")
+        status, body, _ = self.video(model="minimax-h3-mlx-4bit", duration=10, size="1344x768", audio=False,
+                                     images=[{"file": first}, {"file": last, "at": "last"}])
+        self.assertEqual(status, 200, body)
+        with open(os.path.join(self.root, "last-video.json")) as file:
+            asked = json.load(file)
+        self.assertEqual((asked["runner"], asked["checkpoint"], asked["duration"], asked["frames"], asked["audio"]),
+                         ("minimax-h3-mlx", "MiniMaxAI/MiniMax-H3", 10, 243, False))
+        self.assertEqual([i["at"] for i in asked["images"]], ["first", "last"])
+        _, models, _ = self.call("GET", "/v1/models")
+        self.assertNotIn("minimax-h3-mlx-4bit", [m["id"] for m in models["data"]])
+
+    def test_minimax_validates_its_own_limits_and_full_pipeline_memory(self):
+        self.prepare_minimax()
+        for asked in ({"duration": 4}, {"duration": 16}, {"duration": None}, {"duration": "invalid"},
+                      {"duration": float("nan")}, {"frames": 121},
+                      {"size": "512x512"}, {"size": "1344x1344"}):
+            status, body, _ = self.video(model="minimax-h3-mlx-4bit", **asked)
+            self.assertEqual(status, 400, (asked, body))
+        self.service.config["systemMemoryGb"] = 32
+        status, body, _ = self.video(model="minimax-h3-mlx-4bit")
+        self.assertEqual(status, 501, body)
+        self.assertIn("96 GB", body["error"]["message"])
+
+    def test_minimax_download_includes_only_required_upstream_components(self):
+        model = self.prepare_minimax()
+        self.service.downloads.start(model)
+        until = time.time() + 5
+        while time.time() < until and self.service.downloads.state(model["id"])["state"] not in ("done", "failed"):
+            time.sleep(0.02)
+        self.assertEqual(self.service.downloads.state(model["id"])["state"], "done")
+        with open(os.path.join(self.root, "last-fetch.json")) as file:
+            asked = json.load(file)
+        self.assertEqual(asked["repos"], [model["repo"], model["checkpoint"]])
+        self.assertIn("FL2VA/text_encoder/*", asked["allowPatterns"][model["checkpoint"]])
+        self.assertNotIn("FL2VA/transformer/*", asked["allowPatterns"][model["checkpoint"]])
+
+    def test_minimax_builds_the_offline_command_and_parses_progress(self):
+        sys.path.insert(0, os.path.join(ROOT, "worker"))
+        import video
+        with tempfile.TemporaryDirectory() as folder:
+            with open(os.path.join(folder, "a" * 64), "wb") as file:
+                file.write(b"image")
+            request = {"model": "quant", "checkpoint": "base", "prompt": "fox", "duration": 15,
+                       "quality": "high", "seed": 7, "width": 1344, "height": 768,
+                       "images": [{"file": "a" * 64, "at": "last"}]}
+            with patch.object(video, "snapshot", side_effect=lambda repo: "/cache/" + repo):
+                args = video.minimax_command(request, {"files": folder, "minimaxSource": "/runner"}, "/out.mp4")
+            for flag, value in (("--checkpoint", "/cache/base/FL2VA"), ("--transformer", "/cache/quant"),
+                                ("--steps", "17"), ("--duration", "15"), ("--anchor", "last")):
+                self.assertEqual(args[args.index(flag) + 1], value)
+            self.assertEqual(args[:3], [sys.executable, "-u", "/runner/scripts/generate.py"])
+        self.assertEqual(video.progress("  step 4/8  123s", True, 0), (0.5, False))
+        self.assertEqual(video.progress("  step 8/8  123s", True, 0), (0.95, True))
+        self.assertIsNone(video.progress("loading model", True, 0))
+
+    def test_minimax_launcher_uses_the_separate_python(self):
+        sys.path.insert(0, os.path.join(ROOT, "worker"))
+        import launch
+        values = {"minimaxPython": "/h3/python", "ltxPython": "/ltx/python", "scripts": "/scripts"}
+        with patch.object(launch.sys, "argv", ["launch.py", "video", "minimax-h3-mlx"]), \
+             patch.object(launch.common, "settings", return_value=values), \
+             patch.object(launch, "run", return_value=0) as run:
+            self.assertEqual(launch.main(), 0)
+            run.assert_called_once_with("video.py", "/h3/python", "/scripts")
+
+    def test_fetch_applies_the_component_filter_to_huggingface(self):
+        sys.path.insert(0, os.path.join(ROOT, "worker"))
+        import fetch
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        download = Mock()
+        asked = {"repos": ["quant", "base"], "allowPatterns": {"base": ["FL2VA/text_encoder/*", "LICENSE"]}}
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.object(fetch.common, "settings", return_value={"modelCache": folder}), \
+             patch.object(fetch.common, "prepare_environment"), \
+             patch.object(fetch.sys, "stdin", io.StringIO(json.dumps(asked))), \
+             patch.dict(sys.modules, {"huggingface_hub": SimpleNamespace(snapshot_download=download)}), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(fetch.main(), 0)
+        self.assertEqual(download.call_args_list[0].kwargs, {"revision": None, "allow_patterns": None})
+        self.assertEqual(download.call_args_list[1].kwargs,
+                         {"revision": None, "allow_patterns": ["FL2VA/text_encoder/*", "LICENSE"]})
+
+    def test_minimax_worker_runs_the_cli_and_returns_the_clip(self):
+        sys.path.insert(0, os.path.join(ROOT, "worker"))
+        import video
+        with tempfile.TemporaryDirectory() as folder:
+            os.makedirs(os.path.join(folder, "scripts"))
+            with open(os.path.join(folder, "scripts", "generate.py"), "w") as file:
+                file.write("import sys\nfrom pathlib import Path\n"
+                           "assert sys.argv[-2:] == ['--', '-a fox']\n"
+                           "Path(sys.argv[sys.argv.index('--output') + 1]).write_bytes(b'fake mp4')\n"
+                           "print('  step 8/8  100s', flush=True)\n")
+            request = {"runner": "minimax-h3-mlx", "model": "quant", "checkpoint": "base", "duration": 5,
+                       "prompt": "-a fox", "seed": 0, "width": 768, "height": 768}
+            output = io.StringIO()
+            with patch.object(video.common, "settings", return_value={"minimaxSource": folder}), \
+                 patch.object(video.common, "prepare_environment"), \
+                 patch.object(video, "snapshot", side_effect=lambda repo: "/cache/" + repo), \
+                 patch.object(video, "with_ai_note", side_effect=lambda source, *a, **kw: source), \
+                 patch.object(video.sys, "stdin", io.StringIO(json.dumps(request))), \
+                 patch.dict(os.environ), contextlib.redirect_stdout(output):
+                self.assertEqual(video.main(), 0)
+            events = [json.loads(line[len("IMGOMAT "):]) for line in output.getvalue().splitlines() if line.startswith("IMGOMAT ")]
+            self.assertTrue(any(e.get("stage") == "painting" and e["fraction"] == 0.95 for e in events))
+            self.assertEqual(base64.b64decode(events[-1]["mp4"]), b"fake mp4")
+
+    def test_muting_a_clip_copies_only_the_video_stream(self):
+        sys.path.insert(0, os.path.join(ROOT, "worker"))
+        import video
+        with patch.object(video.shutil, "which", return_value="/ffmpeg"), patch.object(video.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            self.assertEqual(video.with_ai_note("/in", "/out", "H3", "test", audio=False), "/out")
+            args = run.call_args[0][0]
+            self.assertEqual(args[args.index("-map") + 1], "0:v:0")
+            run.return_value.returncode = 1
+            run.return_value.stderr = "failed"
+            with self.assertRaises(RuntimeError):
+                video.with_ai_note("/in", "/out", "H3", "test", audio=False)
 
     def test_the_worker_builds_the_ltx_command(self):
         sys.path.insert(0, os.path.join(ROOT, "worker"))

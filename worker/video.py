@@ -1,7 +1,7 @@
-"""Makes one video clip for img-o-mat with ltx-2-mlx (LTX-2.3). Run with the ltx environment's Python
+"""Makes one video clip for img-o-mat with ltx-2-mlx (LTX-2.3) or minimax-h3-mlx. Run with the runner environment's Python
 (install-worker.sh); the service starts it like paint.py, one clip per process, over SSH on the Mac that paints.
 
-ltx-2-mlx runs as its own command line (`ltx-2-mlx generate`), from the local snapshots only: the models came onto the
+Both runners use their own command line; ltx-2-mlx runs (`ltx-2-mlx generate`), from the local snapshots only: the models came onto the
 T7 through the page's download button, and nothing is downloaded here (HF_HUB_OFFLINE). Its progress bars (tqdm on
 stderr) become stage events.
 
@@ -101,20 +101,55 @@ def command(request: dict, values: dict, output: str) -> list[str]:
     return arguments
 
 
-def with_ai_note(source: str, target: str, label: str, creator: str) -> str:
+def minimax_command(request: dict, values: dict, output: str) -> list[str]:
+    arguments = [
+        sys.executable, "-u", os.path.join(values["minimaxSource"], "scripts", "generate.py"),
+        "--output", output,
+        "--checkpoint", os.path.join(snapshot(request["checkpoint"]), "FL2VA"),
+        "--transformer", snapshot(request["model"]),
+        "--duration", str(request["duration"]),
+        # The upstream CLI counts sigma grid points: nine give eight denoising forwards.
+        "--steps", "17" if request.get("quality") == "high" else "9",
+        "--seed", str(int(request["seed"])),
+        "--width", str(int(request["width"])), "--height", str(int(request["height"])),
+    ]
+    for image in request.get("images") or []:
+        path = os.path.join(values["files"], image["file"])
+        if not os.path.isfile(path):
+            print(f"Error: Bild {image['file'][:12]} fehlt auf dem Mac.", flush=True)
+            raise SystemExit(1)
+        arguments += ["--image", path, "--anchor", image.get("at") or "first"]
+    # A prompt beginning with a dash is still text, never a CLI option.
+    return [*arguments, "--", request["prompt"]]
+
+
+def progress(line: str, minimax: bool, bar: int) -> tuple[float, bool] | None:
+    match = re.search(r"step (\d+)/(\d+)", line) if minimax else PROGRESS.search(line)
+    if not match or (not minimax and "%|" not in line):
+        return None
+    done, total = int(match[1]), int(match[2])
+    low, high = (0.05, 0.95) if minimax else BARS[min(bar, len(BARS) - 1)]
+    return round(low + (high - low) * done / max(total, 1), 3), done >= total
+
+
+def with_ai_note(source: str, target: str, label: str, creator: str, audio: bool = True) -> str:
     """The clip with a note in its metadata that it is AI-made (EU AI Act Art. 50(2)), as paint.py's XMP does for
     pictures. The streams are copied, not encoded again; without ffmpeg the clip goes out as it is."""
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
+        if not audio:
+            raise RuntimeError("ffmpeg fehlt; der Ton kann nicht entfernt werden.")
         return source
     note = f"KI-generiert mit {label} ({creator}, img-o-mat)"
     done = subprocess.run(
-        [ffmpeg, "-y", "-loglevel", "error", "-i", source, "-map", "0", "-c", "copy",
+        [ffmpeg, "-y", "-loglevel", "error", "-i", source, "-map", "0" if audio else "0:v:0", "-c", "copy",
          "-metadata", f"comment={note}", "-metadata", f"description={note}", "-metadata", "encoder=img-o-mat",
          "-movflags", "+faststart", target],
         capture_output=True, text=True,
     )
     if done.returncode != 0:
+        if not audio:
+            raise RuntimeError("ffmpeg konnte den Ton nicht entfernen: " + done.stderr.strip())
         print(done.stderr.strip(), flush=True)
         return source
     return target
@@ -129,20 +164,23 @@ def main() -> int:
     os.environ["TQDM_DISABLE"] = "0"
     os.environ["PATH"] = os.pathsep.join([*EXTRA_PATH, os.environ.get("PATH") or "/usr/bin:/bin"])
     if platform.system() == "Darwin" and not shutil.which("ffmpeg"):
-        print("Error: ffmpeg fehlt auf dem Mac (brew install ffmpeg); ltx-2-mlx schreibt das Video damit.", flush=True)
+        print("Error: ffmpeg fehlt auf dem Mac (brew install ffmpeg); die Videorunner schreiben das Video damit.", flush=True)
         return 1
+    minimax = request.get("runner") == "minimax-h3-mlx"
+    runner = "minimax-h3-mlx" if minimax else "ltx-2-mlx"
     emit({"event": "stage", "stage": "loading", "fraction": 0})
     work = tempfile.mkdtemp(prefix="img-o-mat-video-")
     try:
         raw = os.path.join(work, "clip.mp4")
         try:
-            arguments = command(request, values, raw)
+            arguments = (minimax_command if minimax else command)(request, values, raw)
         except SystemExit as stop:
             return int(stop.code or 1)
-        if not os.path.exists(arguments[0]):
-            print("Error: ltx-2-mlx ist auf diesem Mac nicht installiert; install-worker.sh ausführen.", flush=True)
+        if not os.path.exists(arguments[2] if minimax else arguments[0]):
+            print(f"Error: {runner} ist auf diesem Mac nicht installiert; install-worker.sh ausführen.", flush=True)
             return 1
         started = time.perf_counter()
+        os.environ["PYTHONUNBUFFERED"] = "1"
         process = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         bar, last = 0, -1.0
         pending = b""
@@ -157,26 +195,29 @@ def main() -> int:
                 line = raw_line.decode("utf-8", errors="replace").strip()
                 if not line:
                     continue
-                match = PROGRESS.search(line)
-                if match and "%|" in line:
-                    done, total = int(match[1]), int(match[2])
-                    low, high = BARS[min(bar, len(BARS) - 1)]
-                    fraction = round(low + (high - low) * done / max(total, 1), 3)
+                value = progress(line, minimax, bar)
+                if value:
+                    fraction, complete = value
                     if fraction != last:
                         emit({"event": "stage", "stage": "painting", "fraction": fraction})
                         last = fraction
-                    if done >= total:
+                    if complete:
                         bar += 1
                     continue
                 print(line, flush=True)
         code = process.wait()
+        process.stdout.close()
         finished = time.perf_counter()
         if code != 0 or not os.path.exists(raw):
-            print(f"Error: ltx-2-mlx endete mit {code} ohne Video.", flush=True)
+            print(f"Error: {runner} endete mit {code} ohne Video.", flush=True)
             return 1
         emit({"event": "stage", "stage": "saving", "fraction": 0.98})
-        clip = with_ai_note(raw, os.path.join(work, "img-o-mat.mp4"), request.get("label") or request["model"],
-                            request.get("creator") or "img-o-mat")
+        try:
+            clip = with_ai_note(raw, os.path.join(work, "img-o-mat.mp4"), request.get("label") or request["model"],
+                                request.get("creator") or "img-o-mat", audio=request.get("audio") is not False)
+        except RuntimeError as error:
+            print(f"Error: {error}", flush=True)
+            return 1
         with open(clip, "rb") as file:
             data = file.read()
         emit({

@@ -220,11 +220,13 @@ class Painter:
         tail: deque[str] = deque(maxlen=TAIL_LINES)
         done: dict | None = None
         try:
-            process = self.link.start("video") if video else self.link.start("paint", model["runner"])
+            process = self.link.start("video", model["runner"]) if video else self.link.start("paint", model["runner"])
         except OSError as error:
             raise PaintError(500, f"Malen startet nicht: {error}")
         job.process = process
-        timer = threading.Timer(self.config.timeout, self._stop, [process])
+        # H3 dense attention can take hours even on an Ultra; retain the image/LTX timeout.
+        timeout = float(self.config.get("minimaxTimeoutMinutes") or 1440) * 60 if model["runner"] == "minimax-h3-mlx" else self.config.timeout
+        timer = threading.Timer(timeout, self._stop, [process])
         timer.start()
         started = time.time()
         try:
@@ -255,8 +257,8 @@ class Painter:
         if job.cancelled:
             raise Cancelled()
         if process.returncode != 0 or done is None or not done.get("mp4" if video else "jpeg"):
-            if process.returncode and process.returncode < 0 and time.time() - started >= self.config.timeout:
-                raise PaintError(504, f"Das Modell brauchte länger als {self.config.timeout / 60:.0f} Minuten.")
+            if process.returncode and process.returncode < 0 and time.time() - started >= timeout:
+                raise PaintError(504, f"Das Modell brauchte länger als {timeout / 60:.0f} Minuten.")
             status = filter_status(tail)
             if process.returncode == 255 and self.link.ssh and not done:
                 # ssh's own exit code: the connection, not the picture, failed.
@@ -293,6 +295,8 @@ class Painter:
             "runner": model["runner"],
             "model": model["repo"],
             "textEncoder": model["textEncoder"],
+            "checkpoint": model.get("checkpoint"),
+            "duration": asked.get("duration"),
             "label": model["label"],
             "creator": asked.get("creator") or job.app,
             "prompt": asked["prompt"],

@@ -55,7 +55,8 @@ def main() -> int:
         return 1
     try:
         for repo in asked["repos"]:
-            snapshot_download(repo, revision=(asked.get("revisions") or {}).get(repo))
+            snapshot_download(repo, revision=(asked.get("revisions") or {}).get(repo),
+                              allow_patterns=(asked.get("allowPatterns") or {}).get(repo))
     except Exception as error:
         name = type(error).__name__
         if name in ("GatedRepoError", "RepositoryNotFoundError") or "401" in str(error) or "403" in str(error):

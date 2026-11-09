@@ -305,11 +305,28 @@ class Service:
             raise RequestError(400, f"Der Prompt ist länger als {MAX_PROMPT} Zeichen.")
         match = re.fullmatch(r"(\d{3,4})x(\d{3,4})", str(body.get("size") or "768x768"))
         width, height = (int(match[1]), int(match[2])) if match else (0, 0)
+        minimax = model["runner"] == "minimax-h3-mlx"
         # Stage one runs at half the size on a 32-pixel grid.
-        if not (256 <= width <= 1280 and 256 <= height <= 1280 and width % 64 == 0 and height % 64 == 0):
+        if minimax and not (768 <= width <= 1344 and 768 <= height <= 1344 and
+                            min(width, height) == 768 and width % 32 == 0 and height % 32 == 0):
+            raise RequestError(400, "MiniMax: size braucht eine kurze Kante von 768, maximal 1344 und ein 32-Pixel-Raster.")
+        if not minimax and not (256 <= width <= 1280 and 256 <= height <= 1280 and width % 64 == 0 and height % 64 == 0):
             raise RequestError(400, "size ist BreitexHöhe, je 256 bis 1280 und durch 64 teilbar.")
-        frames = int(body.get("frames") or 97)
-        if not (9 <= frames <= MAX_VIDEO_FRAMES and (frames - 1) % 8 == 0):
+        duration = None
+        if minimax:
+            if "frames" in body:
+                raise RequestError(400, "MiniMax nutzt duration (5 bis 15 Sekunden) statt frames.")
+            try:
+                duration = float(body.get("duration", 5))
+            except (TypeError, ValueError):
+                raise RequestError(400, "MiniMax: duration ist eine Zahl von 5 bis 15 Sekunden.")
+            if not 5 <= duration <= 15:
+                raise RequestError(400, "MiniMax: duration geht von 5 bis 15 Sekunden.")
+            frames = int(round(duration * VIDEO_FPS))
+            frames += (5 - frames) % 17
+        else:
+            frames = int(body.get("frames") or 97)
+        if not minimax and not (9 <= frames <= MAX_VIDEO_FRAMES and (frames - 1) % 8 == 0):
             raise RequestError(400, f"frames geht von 9 bis {MAX_VIDEO_FRAMES} und ist 8·k+1 (49 = 2 s, 97 = 4 s, 121 = 5 s).")
         quality = str(body.get("quality") or "fast")
         if quality not in VIDEO_QUALITIES:
@@ -326,10 +343,13 @@ class Service:
             digest = str(image.get("file") or "")
             files[digest] = self.files_use(digest)
             strength = image.get("strength")
+            if minimax and strength is not None and float(strength) != 1.0:
+                raise RequestError(400, "MiniMax unterstützt keine Bildstärke; strength muss 1 sein.")
             images.append({"file": digest, "at": at, "strength": 1.0 if strength is None else max(0.1, min(float(strength), 1.0))})
         request = {
             "kind": "video", "prompt": prompt, "width": width, "height": height, "frames": frames, "fps": VIDEO_FPS,
             "quality": quality, "audio": body.get("audio") is not False, "seed": seed, "images": images, "files": files,
+            "duration": duration,
             "creator": str(body.get("creator") or "")[:60] or None,
             "notify": body.get("notify") is not False,
         }

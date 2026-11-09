@@ -1,6 +1,6 @@
 #!/bin/sh
-# Sets up the Mac that paints (oi-o-mat): three Python environments with the runners (mflux, flux3-mlx, ltx-2-mlx
-# for video clips), the worker scripts and
+# Sets up the Mac that paints (oi-o-mat): four Python environments with the runners (mflux, flux3-mlx, ltx-2-mlx
+# and minimax-h3-mlx for video clips), the worker scripts and
 # worker.json, under ~/Library/Application Support/img-o-mat. The service (on Proxmox, deploy/to-proxmox.sh) starts
 # them over SSH; nothing runs here between pictures.
 #
@@ -39,6 +39,8 @@ TORCH="torch==2.14.0"
 # mp4 with Homebrew's ffmpeg.
 LTX_COMMIT="747b30ef10e92a011e85b2aa0f6c4ee86ced5218"
 LTX_GIT="git+https://github.com/dgrauet/ltx-2-mlx@$LTX_COMMIT"
+# The H3 port has no installable package; retain its CLI and modules at this exact revision.
+MINIMAX_COMMIT="b2f7e4d2b7861cefe68b75e4b59ab81cc4e7c318"
 
 BASE=""
 if ! command -v uv >/dev/null 2>&1; then
@@ -82,6 +84,16 @@ if [ -z "$BASE" ] || "$BASE" -c 'import sys; sys.exit(sys.version_info < (3, 11)
 else
   echo "Hinweis: ltx-2-mlx braucht Python 3.11 oder neuer (brew install uv); Videos gehen sonst nicht."
 fi
+
+# No weights are downloaded by installation; the page fetches the quant and the upstream components explicitly.
+command -v git >/dev/null 2>&1 || { echo "git fehlt (xcode-select --install)." >&2; exit 1; }
+if [ ! -d "$ROOT/minimax-h3-mlx/.git" ]; then
+  git clone https://github.com/PipeNetwork/minimax-h3-mlx.git "$ROOT/minimax-h3-mlx"
+fi
+git -C "$ROOT/minimax-h3-mlx" fetch origin "$MINIMAX_COMMIT"
+git -C "$ROOT/minimax-h3-mlx" checkout --detach "$MINIMAX_COMMIT"
+install "$ROOT/minimax/bin/python" -r "$ROOT/minimax-h3-mlx/requirements.txt" "mlx-vlm" "$PILLOW"
+PYTHONPATH="$ROOT/minimax-h3-mlx" "$ROOT/minimax/bin/python" -c 'from minimax_h3_mlx.pipeline import MiniMaxH3Pipeline; from mlx_vlm.models.qwen3_vl.language import Qwen3VLModel; from transformers import AutoTokenizer, AutoProcessor; from PIL import Image; import huggingface_hub; print("minimax-h3-mlx bereit")'
 
 cp "$HERE"/worker/*.py "$ROOT/worker/"
 if [ ! -f "$ROOT/worker.json" ]; then

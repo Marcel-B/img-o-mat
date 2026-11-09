@@ -14,9 +14,10 @@ from __future__ import annotations
 
 MFLUX = "mflux"
 FLUX3 = "flux3-mlx"
-# The tools the video models are meant for; neither is installed on oi-o-mat yet.
+# Video runners, installed separately from the image environments.
 LTX = "ltx-2-mlx"
 RAPID = "rapid-mlx"
+MINIMAX = "minimax-h3-mlx"
 
 # How many reference pictures (style, figure, place) a model that looks at pictures takes; Tonwerk's cover styles hold
 # four too.
@@ -36,6 +37,9 @@ FIELDS = {
     "moreRepos": [],
     # A video model's text encoder, one of moreRepos (ltx-2-mlx takes it as --gemma).
     "textEncoder": None,
+    "checkpoint": None,
+    # Download only the components the runner uses, rather than duplicate/full precision weights.
+    "allowPatterns": {},
     # Commits to download a repository at, where the runner itself asks for that one (rapid-mlx pins Wan's); others
     # take the newest, as the runners do.
     "revisions": {},
@@ -158,6 +162,26 @@ VIDEOS = [
         "commercial": True,
     },
     {
+        "id": "minimax-h3-mlx-4bit",
+        "label": "MiniMax H3 (4 bit)",
+        "runner": MINIMAX,
+        "model": "pipenetwork/minimax-h3-mlx-4bit",
+        "repo": "pipenetwork/minimax-h3-mlx-4bit",
+        "moreRepos": ["MiniMaxAI/MiniMax-H3"],
+        "checkpoint": "MiniMaxAI/MiniMax-H3",
+        "allowPatterns": {"MiniMaxAI/MiniMax-H3": [
+            "LICENSE", "FL2VA/model_index.json", "FL2VA/text_encoder/*", "FL2VA/tokenizer/*",
+            "FL2VA/processor/*", "FL2VA/video_vae/*", "FL2VA/audio_vae/*",
+        ]},
+        # 4-bit only applies to the DiT: the retained Qwen layers alone occupy about 50 GB.
+        # Conservative gate for the complete pipeline and loading/activation headroom; not measured locally.
+        "minSystemGb": 96,
+        "downloadGb": 104,
+        "memoryGb": 80,
+        "license": "MiniMax H3 Community (kommerziell bis 20 Mio. $ Umsatz; territoriale Einschränkungen)",
+        "commercial": True,
+    },
+    {
         "id": "wan-2.2-ti2v-5b",
         "label": "Wan 2.2 TI2V 5B (8 bit)",
         "runner": RAPID,
@@ -178,6 +202,7 @@ def complete(entry: dict) -> dict:
     model = {**FIELDS, **entry}
     model["moreRepos"] = list(model.get("moreRepos") or [])
     model["revisions"] = dict(model.get("revisions") or {})
+    model["allowPatterns"] = {repo: list(patterns) for repo, patterns in (model.get("allowPatterns") or {}).items()}
     return model
 
 
@@ -198,7 +223,7 @@ def takes_start_image(model: dict) -> bool:
 
 def makes_videos(model: dict) -> bool:
     """Which video models have a runner behind them; Wan waits on the T7 for rapid-mlx."""
-    return model["runner"] == LTX
+    return model["runner"] in (LTX, MINIMAX)
 
 
 def repos(model: dict) -> list[str]:
