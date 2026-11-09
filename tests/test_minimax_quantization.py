@@ -8,6 +8,8 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "worker"))
 import minimax_generate
@@ -15,6 +17,35 @@ import minimax_generate
 
 @unittest.skipUnless(importlib.util.find_spec("mlx"), "requires the optional Apple Silicon MLX environment")
 class QuantizedEncoderTest(unittest.TestCase):
+    def test_image_rows_replace_only_image_tokens_between_text_and_boundaries(self):
+        import numpy as np
+        from mlx_vlm.models.qwen3_vl.language import LanguageModel
+
+        mx = self.mx
+        ids = mx.array([[10, 99, 99, 11, 12, 99, 99, 13, 14]])
+        text = mx.arange(36).reshape(1, 9, 4).astype(mx.float32)
+        visual = mx.arange(16).reshape(4, 4).astype(mx.float32) + 100
+        tags = np.array([0, 1, 1, 0, 0, 1, 1, 0, 0])
+        deepstack = [visual + 200]
+        def hidden(input_ids, positions, **kwargs):
+            self.assertTrue(mx.array_equal(kwargs["visual_pos_masks"], ids == 99).item())
+            self.assertIs(kwargs["deepstack_visual_embeds"], deepstack)
+            return kwargs["inputs_embeds"]
+        encoder = SimpleNamespace(
+            dtype=mx.float32, image_token_id=99,
+            build_request=lambda prompt, images: (ids, tags, (np.zeros((16, 4)), np.array([[1, 2, 4], [1, 2, 4]]))),
+            vision=lambda *args, **kwargs: (visual, deepstack),
+            language=SimpleNamespace(embed_tokens=lambda tokens: text), _hidden_states=hidden)
+        with patch.object(LanguageModel, "get_rope_index", return_value=(None, None)):
+            result, result_tags = minimax_generate.encode_images(encoder, "move", [object(), object()])
+        expected = np.asarray(text).copy()
+        expected[0, [1, 2, 5, 6]] = np.asarray(visual)
+        np.testing.assert_array_equal(np.asarray(result), expected)
+        np.testing.assert_array_equal(result_tags, tags)
+        encoder.vision = lambda *args, **kwargs: (visual[:3], deepstack)
+        with self.assertRaisesRegex(ValueError, "do not match 4 image tokens"):
+            minimax_generate.encode_images(encoder, "move", [object(), object()])
+
     def setUp(self):
         import mlx.core as mx
         import mlx.nn as nn
