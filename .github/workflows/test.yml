@@ -7,7 +7,8 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Keep Python 3.9 available when ubuntu-latest moves to newer releases.
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         # 3.9 is macOS's own python3, which runs the worker's launcher and probe on oi-o-mat.

@@ -322,7 +322,7 @@
 
   <section id="view-video" class="video" data-view-panel="video" hidden>
     <div class="view-head">
-      <div><h1>Video</h1><p>Ein kurzer Clip mit LTX-2.3. Ein Bild am Anfang, eins am Ende oder beide: Der Clip beginnt genau mit dem ersten und läuft auf das letzte zu. Rechne mit 5 bis 20 Minuten.</p></div>
+      <div><h1>Video</h1><p id="videoHelp">Ein kurzer Clip mit LTX-2.3. Bilder am Anfang und Ende geben die Bewegung vor. Rechne mit 5 bis 20 Minuten.</p></div>
     </div>
     <div class="videogrid">
       <div class="card">
@@ -478,15 +478,17 @@ function modelState(m) {
     const share = m.download.fraction != null ? Math.round(m.download.fraction * 100) : null;
     return `<span>lädt herunter${share != null ? ` ${share} %` : ''} (${m.download.gb ?? 0} GB)</span><div class="bar"><div style="width:${share ?? 0}%"></div></div>`;
   }
+  if (m.downloadBlocked) return `<button disabled>Auf ${esc(m.storageVolume)} herunterladen (${m.downloadGb} GB)</button><div class="warn">${esc(m.downloadBlocked)}</div>`;
   if (!m.available) return `<span class="warn">${esc(m.unavailable)}</span>`;
   const failed = m.download?.state === 'failed' ? `<div class="danger">${esc(m.download.error)}</div>` : '';
   if (m.downloaded) return failed;
   const token = m.gated && m.tokenFound === false ? '<div class="warn">braucht einen Hugging-Face-Token</div>' : '';
-  return `<div><button data-download="${esc(m.id)}">Herunterladen (${m.downloadGb} GB)</button></div>${token}${failed}`;
+  return `<div><button data-download="${esc(m.id)}">${m.storageVolume ? `Auf ${esc(m.storageVolume)} herunterladen` : 'Herunterladen'} (${m.downloadGb} GB)</button></div>${token}${failed}`;
 }
 
 function modelBadge(m) {
   if (m.download?.state === 'running' || m.download?.state === 'waiting') return '<span class="badge">lädt</span>';
+  if (m.downloadBlocked) return '<span class="badge warn">Speicherort prüfen</span>';
   if (!m.available) return '<span class="badge warn">nicht verfügbar</span>';
   if (m.downloaded) return m.kind === 'video' ? '<span class="badge ok">heruntergeladen</span>' : '<span class="badge ok">bereit</span>';
   return '<span class="badge">nicht geladen</span>';
@@ -503,7 +505,7 @@ function modelCard(m) {
       <dt>Lizenz</dt><dd>${esc(m.license)}</dd>
       <dt>Nutzung</dt><dd>${m.commercial ? 'kommerziell nutzbar' : 'nur privat'}${m.gated ? ', gesperrt' : ''}</dd>
       <dt>Speicher</dt><dd>${m.memoryGb} GB${video ? ' (geschätzt)' : ''}</dd>
-      ${video ? `<dt>Download</dt><dd>${m.downloadGb} GB</dd><dt>Malen</dt><dd>noch nicht</dd>` : ''}
+      ${video ? `<dt>Download</dt><dd>${m.downloadGb} GB</dd><dt>Videos</dt><dd>${m.paints ? 'unter Video' : 'noch kein Runner'}</dd>` : ''}
     </dl>
     ${state ? `<div class="foot">${state}</div>` : ''}</div>`;
 }
@@ -1290,7 +1292,7 @@ $('paint').addEventListener('click', paint);
 // Video: a clip from a prompt and up to two pictures, the first frame and the last. The clip comes back whole at the
 // end and lives only on this page, like a painted picture.
 const slots = { first: null, last: null };
-let videoJob = null, pickingSlot = null;
+let videoJob = null, pickingSlot = null, videoRunner = null;
 
 function videoReason(m) {
   if (!m.available) return m.unavailable;
@@ -1310,6 +1312,36 @@ function renderVideoModels() {
   const ready = usable.find(m => !videoReason(m));
   if (!$('videoModel').value && ready) $('videoModel').value = ready.id;
   const picked = usable.find(m => m.id === $('videoModel').value);
+  if (picked && videoRunner !== picked.runner + (picked.lowRam ? ":low" : "")) {
+    videoRunner = picked.runner + (picked.lowRam ? ":low" : "");
+    const h3 = picked.runner === 'minimax-h3-mlx';
+    $('videoSize').innerHTML = h3 && picked.lowRam
+      ? '<option value="768x768">768 × 768 · 32-GB-Modus</option>'
+      : h3
+      ? '<option value="1344x768">1344 × 768 · 16:9</option><option value="768x1344">768 × 1344 · 9:16</option><option value="768x768">768 × 768 · 1:1</option>'
+      : '<option value="768x768">768 × 768 · 1:1</option><option value="1024x576">1024 × 576 · 16:9</option><option value="576x1024">576 × 1024 · 9:16</option><option value="512x512">512 × 512 · klein</option>';
+    $('videoFrames').innerHTML = h3 && picked.lowRam
+      ? '<option value="5">5 s</option>'
+      : h3
+      ? '<option value="5">5 s</option><option value="10">10 s</option><option value="15">15 s</option>'
+      : '<option value="49">2 s</option><option value="97" selected>4 s</option><option value="121">5 s</option>';
+    $('videoQuality').innerHTML = h3
+      ? '<option value="fast">8 Schritte</option><option value="high">16 Schritte (langsamer)</option>'
+      : '<option value="fast">schnell (11 Schritte)</option><option value="high">gut (33 Schritte, langsamer)</option>';
+    try {
+      const kept = JSON.parse(localStorage.getItem('img-o-mat.video') || 'null');
+      if (kept && (kept.model === picked.id || (!kept.model && !h3))) {
+        for (const [id, value] of [['videoSize', kept.size], ['videoFrames', h3 ? kept.duration : kept.frames], ['videoQuality', kept.quality]]) {
+          if ([...$(id).options].some(o => o.value === String(value))) $(id).value = String(value);
+        }
+      }
+    } catch {}
+    $('videoHelp').textContent = h3 && picked.lowRam
+      ? 'Powered by MiniMax H3. Experimenteller 32-GB-Modus: 5 Sekunden bei 768 × 768. Die Komponenten werden nacheinander, das Videomodell blockweise geladen. Vollständiger Lauf und Speicherbedarf auf oi-o-mat sind noch zu prüfen. Rechne mit Stunden.'
+      : h3
+      ? 'Powered by MiniMax H3. Video mit synchronem Ton, 5 bis 15 Sekunden. Rechne mit Stunden, auch auf einem Ultra. Die vollständige Pipeline braucht vorerst mindestens 64 GB RAM (geschätzt); Transformer und Textencoder sind in 4 Bit. Start- und Endbilder sind im MLX-Port noch nicht durchgehend erprobt.'
+      : 'Ein kurzer Clip mit LTX-2.3. Bilder am Anfang und Ende geben die Bewegung vor. Rechne mit 5 bis 20 Minuten.';
+  }
   if (!videoJob) $('videoState').textContent = picked && videoReason(picked) ? videoReason(picked) : '';
 }
 
@@ -1358,7 +1390,7 @@ document.querySelectorAll('.slot').forEach(slot => {
   });
 });
 
-const videoStages = { queued: 'wartet', sending: 'überträgt die Bilder', loading: 'lädt LTX', painting: 'filmt', saving: 'schreibt das Video' };
+const videoStages = { queued: 'wartet', sending: 'überträgt die Bilder', loading: 'lädt das Videomodell', painting: 'filmt', saving: 'schreibt das Video' };
 
 async function makeVideo() {
   if ($('videoGo').disabled) return;
@@ -1374,8 +1406,9 @@ async function makeVideo() {
     quality: $('videoQuality').value, audio: $('videoAudio').checked, stream: true, creator: 'img-o-mat',
     images: used.map(([at, s]) => ({ file: s.sha, at })),
   };
+  if (videoRunner?.startsWith('minimax-h3-mlx')) { body.duration = Number($('videoFrames').value); delete body.frames; }
   if ($('videoSeed').value.trim()) body.seed = Number($('videoSeed').value);
-  try { localStorage.setItem('img-o-mat.video', JSON.stringify({ prompt, size: body.size, frames: body.frames, quality: body.quality })); } catch {}
+  try { localStorage.setItem('img-o-mat.video', JSON.stringify({ model: body.model, prompt, size: body.size, frames: body.frames, duration: body.duration, quality: body.quality })); } catch {}
   $('videoCancel').hidden = false; $('videoBar').hidden = false;
   $('videoBar').firstElementChild.style.width = '0';
   $('videoState').textContent = 'wird angefragt …';
@@ -1426,7 +1459,7 @@ function addClip(data, body, seed) {
   const bytes = Uint8Array.from(atob(data.b64_mp4), c => c.charCodeAt(0));
   const url = URL.createObjectURL(new Blob([bytes], { type: 'video/mp4' }));
   const figure = document.createElement('figure');
-  const seconds = Math.round((body.frames - 1) / 24);
+  const seconds = body.duration ?? Math.round((body.frames - 1) / 24);
   figure.innerHTML = `<video src="${url}" controls loop playsinline></video>
     <figcaption><span>${esc(body.model)} · ${seconds} s · ${esc(body.size)} · Seed ${data.seed ?? seed}</span>
       <a href="${url}" download="img-o-mat-${esc(body.model)}-${data.seed ?? seed}.mp4">Herunterladen</a>

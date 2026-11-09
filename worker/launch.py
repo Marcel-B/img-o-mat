@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -63,27 +64,36 @@ def run(script: str, python: str, folder: str) -> int:
     if not os.path.exists(python):
         print(f"Error: {python} fehlt; install.sh --worker auf diesem Mac ausführen.", flush=True)
         return 1
-    child = subprocess.Popen(
-        [python, "-u", os.path.join(folder, script)],
-        stdin=subprocess.PIPE,
-        # sshd passes no environment; the scripts find their root from it.
-        env={**os.environ, "IMG_O_MAT_WORKER_ROOT": common.ROOT},
-        start_new_session=True,
-    )
-    child.stdin.write(request)
-    child.stdin.close()
+    # The launcher survives cancellation of the runner and owns cleanup of its internal scratch space.
+    work = common.create_video_work(common.settings()["videoWork"]) if script == SCRIPTS["video"] else None
+    environment = {**os.environ, "IMG_O_MAT_WORKER_ROOT": common.ROOT}
+    if work:
+        environment["IMG_O_MAT_VIDEO_WORK"] = work
+    try:
+        child = subprocess.Popen(
+            [python, "-u", os.path.join(folder, script)],
+            stdin=subprocess.PIPE,
+            # sshd passes no environment; the scripts find their root from it.
+            env=environment,
+            start_new_session=True,
+        )
+        child.stdin.write(request)
+        child.stdin.close()
 
-    def watch() -> None:
-        while sys.stdin.buffer.read(4096):
-            pass
-        if child.poll() is None:
-            try:
-                os.killpg(child.pid, signal.SIGKILL)
-            except ProcessLookupError:
+        def watch() -> None:
+            while sys.stdin.buffer.read(4096):
                 pass
+            if child.poll() is None:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
-    threading.Thread(target=watch, daemon=True).start()
-    code = child.wait()
+        threading.Thread(target=watch, daemon=True).start()
+        code = child.wait()
+    finally:
+        if work:
+            shutil.rmtree(work, ignore_errors=True)
     # The watcher still blocks on stdin; a normal exit would wait for its lock and abort.
     sys.stdout.flush()
     os._exit(code)
@@ -106,11 +116,14 @@ def main() -> int:
         import gallery
         return gallery.main(sys.argv[2:])
     if command == "probe":
+        common.cleanup_video_work(common.settings()["videoWork"])
         # Short and harmless; no watcher needed.
         return subprocess.call([sys.executable, os.path.join(common.HERE, SCRIPTS["probe"])])
     if command == "video":
         values = common.settings()
-        return run(SCRIPTS["video"], values["ltxPython"], values["scripts"])
+        runner = sys.argv[2] if len(sys.argv) > 2 else "ltx-2-mlx"
+        python = values["minimaxPython"] if runner == "minimax-h3-mlx" else values["ltxPython"]
+        return run(SCRIPTS["video"], python, values["scripts"])
     if command in ("paint", "fetch"):
         values = common.settings()
         runner = sys.argv[2] if len(sys.argv) > 2 else "mflux"

@@ -14,9 +14,10 @@ from __future__ import annotations
 
 MFLUX = "mflux"
 FLUX3 = "flux3-mlx"
-# The tools the video models are meant for; neither is installed on oi-o-mat yet.
+# Video runners, installed separately from the image environments.
 LTX = "ltx-2-mlx"
 RAPID = "rapid-mlx"
+MINIMAX = "minimax-h3-mlx"
 
 # How many reference pictures (style, figure, place) a model that looks at pictures takes; Tonwerk's cover styles hold
 # four too.
@@ -36,6 +37,10 @@ FIELDS = {
     "moreRepos": [],
     # A video model's text encoder, one of moreRepos (ltx-2-mlx takes it as --gemma).
     "textEncoder": None,
+    "checkpoint": None,
+    "storageVolume": None,
+    # Download only the components the runner uses, rather than duplicate/full precision weights.
+    "allowPatterns": {},
     # Commits to download a repository at, where the runner itself asks for that one (rapid-mlx pins Wan's); others
     # take the newest, as the runners do.
     "revisions": {},
@@ -158,6 +163,30 @@ VIDEOS = [
         "commercial": True,
     },
     {
+        "id": "minimax-h3-mlx-4bit",
+        "label": "MiniMax H3 (4 bit)",
+        "storageVolume": "T7",
+        "runner": MINIMAX,
+        "model": "pipenetwork/minimax-h3-mlx-4bit",
+        "repo": "pipenetwork/minimax-h3-mlx-4bit",
+        "moreRepos": ["MiniMaxAI/MiniMax-H3", "ddalcu/MiniMax-H3-FL2VA-MLX-Serve-4bit"],
+        "textEncoder": "ddalcu/MiniMax-H3-FL2VA-MLX-Serve-4bit",
+        "checkpoint": "MiniMaxAI/MiniMax-H3",
+        "allowPatterns": {"MiniMaxAI/MiniMax-H3": [
+            "LICENSE", "FL2VA/model_index.json", "FL2VA/text_encoder/config.json", "FL2VA/tokenizer/*",
+            "FL2VA/processor/*", "FL2VA/video_vae/*", "FL2VA/audio_vae/*",
+        ], "ddalcu/MiniMax-H3-FL2VA-MLX-Serve-4bit": [
+            "text_encoder.safetensors", "config.json", "LICENSE", "NOTICE", "MODIFICATIONS.md", "README.md",
+        ]},
+        # Both the DiT and the H3-specific 50-layer Qwen encoder use 4-bit weights.
+        # Conservative gate for the complete pipeline and loading/activation headroom; not measured locally.
+        "minSystemGb": 32,
+        "downloadGb": 53,
+        "memoryGb": 44,
+        "license": "MiniMax H3 Community (kommerziell bis 20 Mio. $ Umsatz; territoriale Einschränkungen)",
+        "commercial": True,
+    },
+    {
         "id": "wan-2.2-ti2v-5b",
         "label": "Wan 2.2 TI2V 5B (8 bit)",
         "runner": RAPID,
@@ -178,6 +207,7 @@ def complete(entry: dict) -> dict:
     model = {**FIELDS, **entry}
     model["moreRepos"] = list(model.get("moreRepos") or [])
     model["revisions"] = dict(model.get("revisions") or {})
+    model["allowPatterns"] = {repo: list(patterns) for repo, patterns in (model.get("allowPatterns") or {}).items()}
     return model
 
 
@@ -198,7 +228,7 @@ def takes_start_image(model: dict) -> bool:
 
 def makes_videos(model: dict) -> bool:
     """Which video models have a runner behind them; Wan waits on the T7 for rapid-mlx."""
-    return model["runner"] == LTX
+    return model["runner"] in (LTX, MINIMAX)
 
 
 def repos(model: dict) -> list[str]:
@@ -245,6 +275,23 @@ class Catalogue:
         have = probe.get("downloaded") or {}
         return all(have.get(repo) for repo in repos(model))
 
+    def download_unavailable(self, model: dict, probe: dict | None) -> str | None:
+        volume = model.get("storageVolume")
+        if not volume:
+            return None
+        if not probe:
+            return f"Der Mac antwortet nicht; Speicherort auf {volume} kann nicht geprüft werden."
+        if probe.get("modelCacheVolume") != volume or not probe.get("modelCacheMounted"):
+            return f"Der Modellordner muss auf der angeschlossenen {volume} liegen. Kein Download auf die interne SSD."
+        return probe.get("modelCacheStorageError")
+
+    def video_low_ram(self, model: dict, probe: dict | None) -> bool:
+        if model["runner"] != MINIMAX:
+            return False
+        configured = self.config.get("systemMemoryGb")
+        memory = float(configured) if configured else (probe or {}).get("memoryGb")
+        return memory is None or memory < 63.5
+
     def describe_video(self, model: dict, probe: dict | None, probe_error: str | None, download: dict | None = None) -> dict:
         """An entry of GET /v1/models?kind=video: what the page needs to download it and make clips. "paints" says
         whether img-o-mat has a runner for it; "available" whether this Mac can (for one without a runner: could hold it)."""
@@ -263,7 +310,11 @@ class Catalogue:
             "tokenFound": probe.get("tokenFound") if probe else None,
             "minSystemGb": model["minSystemGb"],
             "downloadGb": model["downloadGb"],
-            "memoryGb": model["memoryGb"],
+            "storageVolume": model.get("storageVolume"),
+            "downloadTarget": (probe or {}).get("modelCacheResolved"),
+            "downloadBlocked": self.download_unavailable(model, probe),
+            "memoryGb": 26 if self.video_low_ram(model, probe) else model["memoryGb"],
+            "lowRam": self.video_low_ram(model, probe),
             "paints": makes_videos(model),
             # Whether a clip can be made now (runner installed, model on the disk aside), and why not.
             "ready": cannot is None,

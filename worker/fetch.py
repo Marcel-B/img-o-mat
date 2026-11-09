@@ -33,6 +33,12 @@ def size_gb(folder: str) -> float:
 def main() -> int:
     asked = json.load(sys.stdin)
     values = common.settings()
+    required_volume = common.required_download_volume(asked["repos"]) or asked.get("requiredVolume")
+    if required_volume:
+        error = common.cache_volume_error(values["modelCache"], required_volume, asked["repos"])
+        if error:
+            print(f"Error: {error}", flush=True)
+            return 1
     common.prepare_environment(values)
     hub = os.path.join(values["modelCache"], "hub")
     os.makedirs(hub, exist_ok=True)
@@ -55,7 +61,13 @@ def main() -> int:
         return 1
     try:
         for repo in asked["repos"]:
-            snapshot_download(repo, revision=(asked.get("revisions") or {}).get(repo))
+            # Recheck when a queued download starts and before each repository; never fall back internally.
+            if required_volume:
+                error = common.cache_volume_error(values["modelCache"], required_volume, [repo])
+                if error:
+                    raise RuntimeError(error)
+            snapshot_download(repo, cache_dir=hub, revision=(asked.get("revisions") or {}).get(repo),
+                              allow_patterns=(asked.get("allowPatterns") or {}).get(repo))
     except Exception as error:
         name = type(error).__name__
         if name in ("GatedRepoError", "RepositoryNotFoundError") or "401" in str(error) or "403" in str(error):

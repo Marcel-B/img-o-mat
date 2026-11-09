@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import tempfile
 
 # What the service reads as an event; everything else on stdout is the runner talking.
 PREFIX = "IMGOMAT "
@@ -31,7 +33,33 @@ def volume_of(path: str) -> str | None:
     """The external disk a path lies on (/Volumes/<name>/...), followed through links: on oi-o-mat the model cache is
     a link from the Library to the T7. None for the Mac's own disk."""
     parts = os.path.realpath(path).split(os.sep)
-    return parts[2] if len(parts) > 3 and parts[1] == "Volumes" else None
+    return parts[2] if len(parts) > 2 and parts[1] == "Volumes" else None
+
+
+def required_download_volume(repositories: list[str]) -> str | None:
+    # A service request cannot disable Marcel's T7 requirement for the H3 assets.
+    h3 = {"pipenetwork/minimax-h3-mlx-4bit", "minimaxai/minimax-h3",
+          "ddalcu/minimax-h3-fl2va-mlx-serve-4bit"}
+    return "T7" if h3.intersection(repo.lower() for repo in repositories) else None
+
+
+def cache_volume_error(cache: str, volume: str, repositories: list[str] | None = None) -> str | None:
+    mount = os.path.join("/Volumes", volume)
+    if not os.path.ismount(mount):
+        return f"{volume} ist nicht angeschlossen oder nicht eingehängt. Kein Download auf die interne SSD."
+    if volume_of(cache) != volume:
+        return f"Der Modellordner muss auf {volume} liegen; eingestellt ist {os.path.realpath(cache)}."
+    hub = os.path.join(cache, "hub")
+    paths = [hub, os.path.join(cache, "xet"), os.path.join(cache, "assets"),
+             os.path.join(hub, "blobs"), os.path.join(hub, ".locks")]
+    for repo in repositories or []:
+        name = "models--" + repo.replace("/", "--")
+        root = os.path.join(hub, name)
+        paths += [root, os.path.join(root, "blobs"), os.path.join(root, "snapshots"),
+                  os.path.join(root, "refs"), os.path.join(hub, ".locks", name)]
+    if any(volume_of(path) != volume for path in paths):
+        return f"Ein Modell-Cache-Unterordner verweist außerhalb von {volume}. Download gestoppt."
+    return None
 
 
 def settings() -> dict:
@@ -46,6 +74,7 @@ def settings() -> dict:
         os.path.join("/Volumes", disk, "img-o-mat", "galerie") if disk else os.path.join(ROOT, "gallery"))
     return {
         "modelCache": cache,
+        "videoWork": expand(values.get("videoWork") or os.path.join(ROOT, "video-work")),
         "tokenFiles": [expand(values["tokenFile"])] if values.get("tokenFile") else [
             expand("~/.config/img-o-mat/huggingface.token"),
             # Tonwerk-AI's place from before the service, so the token need not move.
@@ -53,6 +82,9 @@ def settings() -> dict:
         ],
         "python": expand(values.get("python") or os.path.join(ROOT, "env", "bin", "python")),
         "flux3Python": expand(values.get("flux3Python") or os.path.join(ROOT, "flux3", "bin", "python")),
+        "minimaxPython": expand(values.get("minimaxPython") or os.path.join(ROOT, "minimax", "bin", "python")),
+        "minimaxStreamingSource": expand(values.get("minimaxStreamingSource") or os.path.join(ROOT, "minimax-h3-streaming")),
+        "minimaxSource": expand(values.get("minimaxSource") or os.path.join(ROOT, "minimax-h3-mlx")),
         "ltxPython": expand(values.get("ltxPython") or os.path.join(ROOT, "ltx", "bin", "python")),
         "files": expand(values.get("files") or os.path.join(ROOT, "files")),
         "gallery": gallery,
@@ -60,6 +92,48 @@ def settings() -> dict:
         # Tests put fake paint.py and fetch.py here.
         "scripts": expand(values.get("scripts") or HERE),
     }
+
+
+def cleanup_video_work(folder: str) -> None:
+    """Remove only managed video jobs whose launcher no longer exists, never active jobs."""
+    try:
+        with os.scandir(folder) as scan:
+            entries = list(scan)
+    except FileNotFoundError:
+        return
+    for entry in entries:
+        if not entry.name.startswith("img-o-mat-video-") or not entry.is_dir(follow_symlinks=False):
+            continue
+        try:
+            with open(os.path.join(entry.path, "owner-pid")) as file:
+                owner = int(file.read())
+            if owner <= 0:
+                continue
+            os.kill(owner, 0)
+        except ProcessLookupError:
+            shutil.rmtree(entry.path, ignore_errors=True)
+        except FileNotFoundError:
+            # A crash between mkdir and writing ownership can leave an empty directory.
+            try:
+                os.rmdir(entry.path)
+            except OSError:
+                pass
+        except (OSError, ValueError, OverflowError):
+            # Unknown ownership or an inaccessible process is not evidence that a job is dead.
+            continue
+
+
+def create_video_work(folder: str) -> str:
+    os.makedirs(folder, exist_ok=True)
+    cleanup_video_work(folder)
+    work = tempfile.mkdtemp(prefix="img-o-mat-video-", dir=folder)
+    try:
+        with open(os.path.join(work, "owner-pid"), "w") as file:
+            file.write(str(os.getpid()))
+    except BaseException:
+        shutil.rmtree(work, ignore_errors=True)
+        raise
+    return work
 
 
 def token(values: dict) -> str | None:
@@ -77,6 +151,11 @@ def token(values: dict) -> str | None:
 def prepare_environment(values: dict) -> None:
     """Hugging Face's cache and token for this process, before anything imports huggingface_hub."""
     os.environ["HF_HOME"] = values["modelCache"]
+    # Inherited Hugging Face overrides must not redirect large model blobs or Xet data internally.
+    os.environ["HF_HUB_CACHE"] = os.path.join(values["modelCache"], "hub")
+    os.environ["HUGGINGFACE_HUB_CACHE"] = os.environ["HF_HUB_CACHE"]
+    os.environ["HF_XET_CACHE"] = os.path.join(values["modelCache"], "xet")
+    os.environ["HF_ASSETS_CACHE"] = os.path.join(values["modelCache"], "assets")
     os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
     os.environ["TQDM_DISABLE"] = "1"
     if found := token(values):

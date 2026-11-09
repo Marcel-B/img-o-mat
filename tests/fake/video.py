@@ -23,4 +23,4 @@ if "fail" in request["prompt"]:
     sys.exit(1)
 common.emit({"event": "stage", "stage": "painting", "fraction": 0.5})
 common.emit({"event": "done", "mp4": base64.b64encode(b"\0\0\0\x18ftypisom fake clip").decode(), "loadSeconds": None,
-             "paintSeconds": 1.5, "peakMemoryGb": None})
+             "paintSeconds": 1.5, "peakMemoryGb": 12.5})
