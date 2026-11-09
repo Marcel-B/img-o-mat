@@ -3,12 +3,19 @@
 Moved from Tonwerk-AI's Images/ImageModels.cs (2026-10-28) with the same ids, so pictures Tonwerk painted before keep
 naming their model. The list can be replaced in the configuration ("models"); an entry there takes the defaults' fields
 it leaves out.
+
+Video models (VIDEOS, replaced by "videos" in the configuration) are a list of their own: for now they can only be
+downloaded onto the T7, ahead of a runner that paints with them (Marcel's wish, 2026-11-09). They never show up in
+GET /v1/models or in a painting request, so Tonwerk and the other clients see nothing of them.
 """
 
 from __future__ import annotations
 
 MFLUX = "mflux"
 FLUX3 = "flux3-mlx"
+# The tools the video models are meant for; neither is installed on oi-o-mat yet.
+LTX = "ltx-2-mlx"
+RAPID = "rapid-mlx"
 
 # How many reference pictures (style, figure, place) a model that looks at pictures takes; Tonwerk's cover styles hold
 # four too.
@@ -26,6 +33,9 @@ FIELDS = {
     "repo": "",
     # Further repositories its first picture downloads (FLUX 3's prompt upsampler).
     "moreRepos": [],
+    # Commits to download a repository at, where the runner itself asks for that one (rapid-mlx pins Wan's); others
+    # take the newest, as the runners do.
+    "revisions": {},
     # Bits mflux quantizes to when it loads (the download is the full one either way); null for bfloat16.
     "quantize": None,
     # The steps the model is distilled to; more make it slower, not better.
@@ -125,9 +135,45 @@ DEFAULTS = [
 ]
 
 
+# Sizes are the full repositories, as fetch.py downloads them; memory is an estimate from the tools' READMEs, not measured.
+VIDEOS = [
+    {
+        "id": "ltx-2.3",
+        "label": "LTX-2.3 (8 bit)",
+        "runner": LTX,
+        "model": "dgrauet/ltx-2.3-mlx-q8",
+        "repo": "dgrauet/ltx-2.3-mlx-q8",
+        # The text encoder ltx-2-mlx loads for 2.3 packs; the pack does not bring it.
+        "moreRepos": ["mlx-community/gemma-3-12b-it-4bit"],
+        # ltx-2-mlx: int8 needs 32 GB, or 16 GB with --low-ram.
+        "minSystemGb": 32,
+        # The pack holds dev and distilled transformers and both upscalers (72 GB), the text encoder 8 GB.
+        "downloadGb": 81,
+        "memoryGb": 22,
+        "license": "LTX-2 Community (kommerziell bis 10 Mio. $ Umsatz), Gemma für den Textencoder",
+        "commercial": True,
+    },
+    {
+        "id": "wan-2.2-ti2v-5b",
+        "label": "Wan 2.2 TI2V 5B (8 bit)",
+        "runner": RAPID,
+        "model": "Anes1032/Wan2.2-TI2V-5B-mlx-q8",
+        "repo": "Anes1032/Wan2.2-TI2V-5B-mlx-q8",
+        # The commit rapid-mlx 1.0.2 pins (video/wan.py); it loads no other.
+        "revisions": {"Anes1032/Wan2.2-TI2V-5B-mlx-q8": "9624723c94ddf509832555c45e223a035baa7d1c"},
+        "minSystemGb": 32,
+        "downloadGb": 20,
+        "memoryGb": 20,
+        "license": "Apache 2.0",
+        "commercial": True,
+    },
+]
+
+
 def complete(entry: dict) -> dict:
     model = {**FIELDS, **entry}
     model["moreRepos"] = list(model.get("moreRepos") or [])
+    model["revisions"] = dict(model.get("revisions") or {})
     return model
 
 
@@ -156,12 +202,17 @@ class Catalogue:
         self.config = config
         entries = config.get("models") or DEFAULTS
         self.models = [complete(entry) for entry in entries if entry.get("id")]
+        videos = config.get("videos")
+        self.videos = [complete(entry) for entry in (VIDEOS if videos is None else videos) if entry.get("id")]
 
     def find(self, model_id: str) -> dict | None:
         return next((m for m in self.models if m["id"] == model_id), None)
 
+    def find_video(self, model_id: str) -> dict | None:
+        return next((m for m in self.videos if m["id"] == model_id), None)
+
     def all_repos(self) -> list[str]:
-        return sorted({repo for model in self.models for repo in repos(model)})
+        return sorted({repo for model in self.models + self.videos for repo in repos(model)})
 
     def unavailable(self, model: dict, probe: dict | None, probe_error: str | None) -> str | None:
         """Why the Mac that paints cannot paint with the model; None when it can."""
@@ -172,6 +223,9 @@ class Catalogue:
         # Half a GB of slack: what the system reports can fall a little short of what the Mac is sold with.
         if model["minSystemGb"] and has is not None and has < model["minSystemGb"] - 0.5:
             return f"{model['label']} braucht einen Mac mit {model['minSystemGb']:.0f} GB, {probe.get('host') or 'dieser'} hat {has:.0f}."
+        if model in self.videos:
+            # Nothing paints videos yet; what is left to say is whether the Mac could hold one.
+            return None
         if not (probe.get("runners") or {}).get(model["runner"]):
             return f"{model['runner']} ist auf {probe.get('host') or 'dem Mac'} nicht installiert; dort install.sh --worker ausführen."
         return None
@@ -181,6 +235,31 @@ class Catalogue:
             return None
         have = probe.get("downloaded") or {}
         return all(have.get(repo) for repo in repos(model))
+
+    def describe_video(self, model: dict, probe: dict | None, probe_error: str | None, download: dict | None = None) -> dict:
+        """An entry of GET /v1/models?kind=video: what the page needs to download it. "available" says only that this
+        Mac could hold it; painting with it comes later."""
+        reason = self.unavailable(model, probe, probe_error)
+        return {
+            "id": model["id"],
+            "object": "model",
+            "owned_by": "img-o-mat",
+            "kind": "video",
+            "label": model["label"],
+            "runner": model["runner"],
+            "license": model["license"],
+            "commercial": model["commercial"],
+            "gated": model["gated"],
+            "tokenFound": probe.get("tokenFound") if probe else None,
+            "minSystemGb": model["minSystemGb"],
+            "downloadGb": model["downloadGb"],
+            "memoryGb": model["memoryGb"],
+            "paints": False,
+            "downloaded": self.downloaded(model, probe),
+            "download": download,
+            "available": reason is None,
+            "unavailable": reason,
+        }
 
     def describe(self, model: dict, probe: dict | None, probe_error: str | None, download: dict | None = None) -> dict:
         """An entry of GET /v1/models: OpenAI's fields plus what a client needs to offer the model."""

@@ -8,6 +8,8 @@ sys.path.insert(0, os.environ.get("IMG_O_MAT_SOURCE_WORKER") or os.path.join(os.
 import common  # noqa: E402
 
 asked = json.load(sys.stdin)
+with open(os.path.join(common.ROOT, "last-fetch.json"), "w") as out:
+    json.dump(asked, out)
 hub = os.path.join(common.settings()["modelCache"], "hub")
 for repo in asked["repos"]:
     os.makedirs(os.path.join(hub, "models--" + repo.replace("/", "--"), "snapshots"), exist_ok=True)
