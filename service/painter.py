@@ -297,6 +297,7 @@ class Painter:
             "textEncoder": model["textEncoder"],
             "checkpoint": model.get("checkpoint"),
             "duration": asked.get("duration"),
+            "lowRam": asked.get("lowRam", False),
             "label": model["label"],
             "creator": asked.get("creator") or job.app,
             "prompt": asked["prompt"],

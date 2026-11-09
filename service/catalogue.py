@@ -178,7 +178,7 @@ VIDEOS = [
         ]},
         # Both the DiT and the H3-specific 50-layer Qwen encoder use 4-bit weights.
         # Conservative gate for the complete pipeline and loading/activation headroom; not measured locally.
-        "minSystemGb": 64,
+        "minSystemGb": 32,
         "downloadGb": 53,
         "memoryGb": 44,
         "license": "MiniMax H3 Community (kommerziell bis 20 Mio. $ Umsatz; territoriale Einschränkungen)",
@@ -273,6 +273,13 @@ class Catalogue:
         have = probe.get("downloaded") or {}
         return all(have.get(repo) for repo in repos(model))
 
+    def video_low_ram(self, model: dict, probe: dict | None) -> bool:
+        if model["runner"] != MINIMAX:
+            return False
+        configured = self.config.get("systemMemoryGb")
+        memory = float(configured) if configured else (probe or {}).get("memoryGb")
+        return memory is None or memory < 63.5
+
     def describe_video(self, model: dict, probe: dict | None, probe_error: str | None, download: dict | None = None) -> dict:
         """An entry of GET /v1/models?kind=video: what the page needs to download it and make clips. "paints" says
         whether img-o-mat has a runner for it; "available" whether this Mac can (for one without a runner: could hold it)."""
@@ -291,7 +298,8 @@ class Catalogue:
             "tokenFound": probe.get("tokenFound") if probe else None,
             "minSystemGb": model["minSystemGb"],
             "downloadGb": model["downloadGb"],
-            "memoryGb": model["memoryGb"],
+            "memoryGb": 26 if self.video_low_ram(model, probe) else model["memoryGb"],
+            "lowRam": self.video_low_ram(model, probe),
             "paints": makes_videos(model),
             # Whether a clip can be made now (runner installed, model on the disk aside), and why not.
             "ready": cannot is None,

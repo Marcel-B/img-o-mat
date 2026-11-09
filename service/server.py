@@ -306,6 +306,7 @@ class Service:
         match = re.fullmatch(r"(\d{3,4})x(\d{3,4})", str(body.get("size") or "768x768"))
         width, height = (int(match[1]), int(match[2])) if match else (0, 0)
         minimax = model["runner"] == "minimax-h3-mlx"
+        low_ram = self.catalogue.video_low_ram(model, probe)
         # Stage one runs at half the size on a 32-pixel grid.
         if minimax and not (768 <= width <= 1344 and 768 <= height <= 1344 and
                             min(width, height) == 768 and width % 32 == 0 and height % 32 == 0):
@@ -322,6 +323,8 @@ class Service:
                 raise RequestError(400, "MiniMax: duration ist eine Zahl von 5 bis 15 Sekunden.")
             if not 5 <= duration <= 15:
                 raise RequestError(400, "MiniMax: duration geht von 5 bis 15 Sekunden.")
+            if low_ram and (duration != 5 or (width, height) != (768, 768)):
+                raise RequestError(400, "MiniMax im 32-GB-Modus: vorerst nur 5 Sekunden bei 768x768.")
             frames = int(round(duration * VIDEO_FPS))
             frames += (5 - frames) % 17
         else:
@@ -349,7 +352,7 @@ class Service:
         request = {
             "kind": "video", "prompt": prompt, "width": width, "height": height, "frames": frames, "fps": VIDEO_FPS,
             "quality": quality, "audio": body.get("audio") is not False, "seed": seed, "images": images, "files": files,
-            "duration": duration,
+            "duration": duration, "lowRam": low_ram,
             "creator": str(body.get("creator") or "")[:60] or None,
             "notify": body.get("notify") is not False,
         }
@@ -403,7 +406,7 @@ def answer_of(job: Job) -> dict:
             "created": int(job.created),
             "model": job.model["id"],
             "data": [{"b64_mp4": base64.b64encode(r["mp4"]).decode("ascii"), "seed": r["seed"],
-                      "paintSeconds": r["paintSeconds"]} for r in job.results],
+                      "paintSeconds": r["paintSeconds"], "peakMemoryGb": r.get("peakMemoryGb")} for r in job.results],
         }
     return {
         "created": int(job.created),
@@ -725,7 +728,8 @@ class Handler(BaseHTTPRequestHandler):
                 kind = event.pop("event")
                 if kind == "video":
                     send("video", {"index": 0, "b64_mp4": base64.b64encode(event["mp4"]).decode("ascii"),
-                                   "seed": event["seed"], "paintSeconds": event["paintSeconds"]})
+                                   "seed": event["seed"], "paintSeconds": event["paintSeconds"],
+                                   "peakMemoryGb": event.get("peakMemoryGb")})
                 elif kind == "image":
                     result = event
                     send("image", {"index": result["index"], "b64_json": base64.b64encode(result["jpeg"]).decode("ascii"),

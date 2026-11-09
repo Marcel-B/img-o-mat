@@ -99,9 +99,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--source", required=True)
     parser.add_argument("--quantized-text-encoder", required=True)
+    parser.add_argument("--low-ram", action="store_true")
     arguments, remaining = parser.parse_known_args()
     source = Path(arguments.source)
     sys.path.insert(0, str(source))
+    if arguments.low_ram:
+        from minimax_low_ram import generate
+        generate(source, Path(arguments.quantized_text_encoder), remaining)
+        return
     install_encoder(Path(arguments.quantized_text_encoder))
     script = source / "scripts" / "generate.py"
     sys.argv = [str(script), *remaining]

@@ -115,6 +115,8 @@ def minimax_command(request: dict, values: dict, output: str) -> list[str]:
         "--seed", str(int(request["seed"])),
         "--width", str(int(request["width"])), "--height", str(int(request["height"])),
     ]
+    if request.get("lowRam"):
+        arguments.append("--low-ram")
     for image in request.get("images") or []:
         path = os.path.join(values["files"], image["file"])
         if not os.path.isfile(path):
@@ -185,6 +187,7 @@ def main() -> int:
         os.environ["PYTHONUNBUFFERED"] = "1"
         process = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         bar, last = 0, -1.0
+        peak_memory = None
         pending = b""
         while True:
             chunk = process.stdout.read1(4096) if hasattr(process.stdout, "read1") else process.stdout.read(4096)
@@ -196,6 +199,9 @@ def main() -> int:
             for raw_line in lines:
                 line = raw_line.decode("utf-8", errors="replace").strip()
                 if not line:
+                    continue
+                if minimax and line.startswith("MINIMAX_PEAK_GB="):
+                    peak_memory = max(peak_memory or 0, float(line.split("=", 1)[1]))
                     continue
                 value = progress(line, minimax, bar)
                 if value:
@@ -227,7 +233,7 @@ def main() -> int:
             "mp4": base64.b64encode(data).decode("ascii"),
             "loadSeconds": None,
             "paintSeconds": round(finished - started, 1),
-            "peakMemoryGb": None,
+            "peakMemoryGb": peak_memory,
         })
         return 0
     finally:

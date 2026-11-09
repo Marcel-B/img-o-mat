@@ -725,6 +725,7 @@ class VideoTest(unittest.TestCase):
         clip = json.loads(events[-2][1].removeprefix("data: "))
         self.assertEqual(base64.b64decode(clip["b64_mp4"])[4:8], b"ftyp")
         self.assertEqual(clip["seed"], 7)
+        self.assertEqual(clip["peakMemoryGb"], 12.5)
         with open(os.path.join(self.root, "last-video.json")) as file:
             asked = json.load(file)
         self.assertEqual((asked["model"], asked["textEncoder"]), ("dgrauet/ltx-2.3-mlx-q8", "mlx-community/gemma-3-12b-it-4bit"))
@@ -739,6 +740,7 @@ class VideoTest(unittest.TestCase):
         status, body, _ = self.video()
         self.assertEqual(status, 200, body)
         self.assertTrue(body["data"][0]["b64_mp4"])
+        self.assertEqual(body["data"][0]["peakMemoryGb"], 12.5)
         status, body, _ = self.video(prompt="please fail")
         self.assertEqual(status, 500)
         self.assertIn("ohne Video", body["error"]["message"])
@@ -796,10 +798,27 @@ class VideoTest(unittest.TestCase):
                       {"size": "512x512"}, {"size": "1344x1344"}):
             status, body, _ = self.video(model="minimax-h3-mlx-4bit", **asked)
             self.assertEqual(status, 400, (asked, body))
-        self.service.config["systemMemoryGb"] = 32
+        self.service.config["systemMemoryGb"] = 24
         status, body, _ = self.video(model="minimax-h3-mlx-4bit")
         self.assertEqual(status, 501, body)
-        self.assertIn("64 GB", body["error"]["message"])
+        self.assertIn("32 GB", body["error"]["message"])
+
+    def test_minimax_32gb_profile_limits_requests_and_selects_phased_loading(self):
+        self.prepare_minimax()
+        self.service.config["systemMemoryGb"] = 32
+        _, models, _ = self.call("GET", "/v1/models?kind=video&fresh=1")
+        model = next(m for m in models["data"] if m["id"] == "minimax-h3-mlx-4bit")
+        self.assertTrue(model["ready"] and model["lowRam"], model)
+        for parameters in ({"duration": 10}, {"size": "1344x768"}):
+            status, body, _ = self.video(model=model["id"], **parameters)
+            self.assertEqual(status, 400, body)
+            self.assertIn("32-GB-Modus", body["error"]["message"])
+        status, body, _ = self.video(model=model["id"], lowRam=False)
+        self.assertEqual(status, 200, body)
+        with open(os.path.join(self.root, "last-video.json")) as file:
+            asked = json.load(file)
+        self.assertTrue(asked["lowRam"])
+        self.assertEqual((asked["width"], asked["height"], asked["duration"]), (768, 768, 5))
 
     def test_minimax_download_includes_only_required_upstream_components(self):
         model = self.prepare_minimax()
@@ -823,7 +842,7 @@ class VideoTest(unittest.TestCase):
             with open(os.path.join(folder, "a" * 64), "wb") as file:
                 file.write(b"image")
             request = {"model": "quant", "checkpoint": "base", "textEncoder": "encoder", "prompt": "fox", "duration": 15,
-                       "quality": "high", "seed": 7, "width": 1344, "height": 768,
+                       "quality": "high", "seed": 7, "width": 1344, "height": 768, "lowRam": True,
                        "images": [{"file": "a" * 64, "at": "last"}]}
             with patch.object(video, "snapshot", side_effect=lambda repo: "/cache/" + repo):
                 args = video.minimax_command(request, {"files": folder, "minimaxSource": "/runner"}, "/out.mp4")
@@ -832,6 +851,7 @@ class VideoTest(unittest.TestCase):
                                 ("--quantized-text-encoder", "/cache/encoder"), ("--source", "/runner")):
                 self.assertEqual(args[args.index(flag) + 1], value)
             self.assertEqual(args[:3], [sys.executable, "-u", os.path.join(ROOT, "worker", "minimax_generate.py")])
+            self.assertIn("--low-ram", args)
         self.assertEqual(video.progress("  step 4/8  123s", True, 0), (0.5, False))
         self.assertEqual(video.progress("  step 8/8  123s", True, 0), (0.95, True))
         self.assertIsNone(video.progress("loading model", True, 0))
@@ -873,7 +893,8 @@ class VideoTest(unittest.TestCase):
                 file.write("import sys\nfrom pathlib import Path\n"
                            "assert sys.argv[-2:] == ['--', '-a fox']\n"
                            "Path(sys.argv[sys.argv.index('--output') + 1]).write_bytes(b'fake mp4')\n"
-                           "print('  step 8/8  100s', flush=True)\n")
+                           "print('  step 8/8  100s', flush=True)\n"
+                           "print('MINIMAX_PEAK_GB=8.25', flush=True)\n")
             package = os.path.join(folder, "minimax_h3_mlx")
             os.makedirs(package)
             with open(os.path.join(package, "__init__.py"), "w") as file:
@@ -897,6 +918,7 @@ class VideoTest(unittest.TestCase):
             events = [json.loads(line[len("IMGOMAT "):]) for line in output.getvalue().splitlines() if line.startswith("IMGOMAT ")]
             self.assertTrue(any(e.get("stage") == "painting" and e["fraction"] == 0.95 for e in events))
             self.assertEqual(base64.b64decode(events[-1]["mp4"]), b"fake mp4")
+            self.assertEqual(events[-1]["peakMemoryGb"], 8.25)
 
     def test_muting_a_clip_copies_only_the_video_stream(self):
         sys.path.insert(0, os.path.join(ROOT, "worker"))
