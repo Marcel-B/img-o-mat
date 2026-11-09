@@ -1331,7 +1331,7 @@ function renderVideoModels() {
       }
     } catch {}
     $('videoHelp').textContent = h3
-      ? 'Powered by MiniMax H3. Video mit synchronem Ton, 5 bis 15 Sekunden. Rechne mit Stunden, auch auf einem Ultra. Die vollständige Pipeline braucht vorerst mindestens 96 GB RAM; 4 Bit gilt nur für den Transformer. Start- und Endbilder sind im MLX-Port noch nicht durchgehend erprobt.'
+      ? 'Powered by MiniMax H3. Video mit synchronem Ton, 5 bis 15 Sekunden. Rechne mit Stunden, auch auf einem Ultra. Die vollständige Pipeline braucht vorerst mindestens 64 GB RAM (geschätzt); Transformer und Textencoder sind in 4 Bit. Start- und Endbilder sind im MLX-Port noch nicht durchgehend erprobt.'
       : 'Ein kurzer Clip mit LTX-2.3. Bilder am Anfang und Ende geben die Bewegung vor. Rechne mit 5 bis 20 Minuten.';
   }
   if (!videoJob) $('videoState').textContent = picked && videoReason(picked) ? videoReason(picked) : '';

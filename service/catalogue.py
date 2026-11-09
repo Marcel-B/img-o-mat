@@ -167,17 +167,20 @@ VIDEOS = [
         "runner": MINIMAX,
         "model": "pipenetwork/minimax-h3-mlx-4bit",
         "repo": "pipenetwork/minimax-h3-mlx-4bit",
-        "moreRepos": ["MiniMaxAI/MiniMax-H3"],
+        "moreRepos": ["MiniMaxAI/MiniMax-H3", "ddalcu/MiniMax-H3-FL2VA-MLX-Serve-4bit"],
+        "textEncoder": "ddalcu/MiniMax-H3-FL2VA-MLX-Serve-4bit",
         "checkpoint": "MiniMaxAI/MiniMax-H3",
         "allowPatterns": {"MiniMaxAI/MiniMax-H3": [
-            "LICENSE", "FL2VA/model_index.json", "FL2VA/text_encoder/*", "FL2VA/tokenizer/*",
+            "LICENSE", "FL2VA/model_index.json", "FL2VA/text_encoder/config.json", "FL2VA/tokenizer/*",
             "FL2VA/processor/*", "FL2VA/video_vae/*", "FL2VA/audio_vae/*",
+        ], "ddalcu/MiniMax-H3-FL2VA-MLX-Serve-4bit": [
+            "text_encoder.safetensors", "config.json", "LICENSE", "NOTICE", "MODIFICATIONS.md", "README.md",
         ]},
-        # 4-bit only applies to the DiT: the retained Qwen layers alone occupy about 50 GB.
+        # Both the DiT and the H3-specific 50-layer Qwen encoder use 4-bit weights.
         # Conservative gate for the complete pipeline and loading/activation headroom; not measured locally.
-        "minSystemGb": 96,
-        "downloadGb": 104,
-        "memoryGb": 80,
+        "minSystemGb": 64,
+        "downloadGb": 53,
+        "memoryGb": 44,
         "license": "MiniMax H3 Community (kommerziell bis 20 Mio. $ Umsatz; territoriale Einschränkungen)",
         "commercial": True,
     },

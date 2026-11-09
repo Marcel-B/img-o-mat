@@ -753,7 +753,7 @@ class VideoTest(unittest.TestCase):
             self.assertIn(part, body["error"]["message"])
 
     def prepare_minimax(self):
-        self.service.config["systemMemoryGb"] = 96
+        self.service.config["systemMemoryGb"] = 64
         self.addCleanup(self.service.config.__setitem__, "systemMemoryGb", 32)
         config_file = os.path.join(self.root, "worker.json")
         with open(config_file) as file:
@@ -770,7 +770,7 @@ class VideoTest(unittest.TestCase):
         with open(os.path.join(scripts, "generate.py"), "w") as file:
             file.write("# fake installation")
         model = self.service.catalogue.find_video("minimax-h3-mlx-4bit")
-        for repo in (model["repo"], model["checkpoint"]):
+        for repo in (model["repo"], *model["moreRepos"]):
             os.makedirs(os.path.join(self.root, "models", "hub", "models--" + repo.replace("/", "--"), "snapshots"), exist_ok=True)
         self.service.link.forget_probe()
         return model
@@ -799,7 +799,7 @@ class VideoTest(unittest.TestCase):
         self.service.config["systemMemoryGb"] = 32
         status, body, _ = self.video(model="minimax-h3-mlx-4bit")
         self.assertEqual(status, 501, body)
-        self.assertIn("96 GB", body["error"]["message"])
+        self.assertIn("64 GB", body["error"]["message"])
 
     def test_minimax_download_includes_only_required_upstream_components(self):
         model = self.prepare_minimax()
@@ -810,8 +810,10 @@ class VideoTest(unittest.TestCase):
         self.assertEqual(self.service.downloads.state(model["id"])["state"], "done")
         with open(os.path.join(self.root, "last-fetch.json")) as file:
             asked = json.load(file)
-        self.assertEqual(asked["repos"], [model["repo"], model["checkpoint"]])
-        self.assertIn("FL2VA/text_encoder/*", asked["allowPatterns"][model["checkpoint"]])
+        self.assertEqual(asked["repos"], [model["repo"], *model["moreRepos"]])
+        self.assertIn("FL2VA/text_encoder/config.json", asked["allowPatterns"][model["checkpoint"]])
+        self.assertNotIn("FL2VA/text_encoder/*", asked["allowPatterns"][model["checkpoint"]])
+        self.assertEqual(asked["allowPatterns"][model["textEncoder"]][0], "text_encoder.safetensors")
         self.assertNotIn("FL2VA/transformer/*", asked["allowPatterns"][model["checkpoint"]])
 
     def test_minimax_builds_the_offline_command_and_parses_progress(self):
@@ -820,15 +822,16 @@ class VideoTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             with open(os.path.join(folder, "a" * 64), "wb") as file:
                 file.write(b"image")
-            request = {"model": "quant", "checkpoint": "base", "prompt": "fox", "duration": 15,
+            request = {"model": "quant", "checkpoint": "base", "textEncoder": "encoder", "prompt": "fox", "duration": 15,
                        "quality": "high", "seed": 7, "width": 1344, "height": 768,
                        "images": [{"file": "a" * 64, "at": "last"}]}
             with patch.object(video, "snapshot", side_effect=lambda repo: "/cache/" + repo):
                 args = video.minimax_command(request, {"files": folder, "minimaxSource": "/runner"}, "/out.mp4")
             for flag, value in (("--checkpoint", "/cache/base/FL2VA"), ("--transformer", "/cache/quant"),
-                                ("--steps", "17"), ("--duration", "15"), ("--anchor", "last")):
+                                ("--steps", "17"), ("--duration", "15"), ("--anchor", "last"),
+                                ("--quantized-text-encoder", "/cache/encoder"), ("--source", "/runner")):
                 self.assertEqual(args[args.index(flag) + 1], value)
-            self.assertEqual(args[:3], [sys.executable, "-u", "/runner/scripts/generate.py"])
+            self.assertEqual(args[:3], [sys.executable, "-u", os.path.join(ROOT, "worker", "minimax_generate.py")])
         self.assertEqual(video.progress("  step 4/8  123s", True, 0), (0.5, False))
         self.assertEqual(video.progress("  step 8/8  123s", True, 0), (0.95, True))
         self.assertIsNone(video.progress("loading model", True, 0))
@@ -871,12 +874,22 @@ class VideoTest(unittest.TestCase):
                            "assert sys.argv[-2:] == ['--', '-a fox']\n"
                            "Path(sys.argv[sys.argv.index('--output') + 1]).write_bytes(b'fake mp4')\n"
                            "print('  step 8/8  100s', flush=True)\n")
-            request = {"runner": "minimax-h3-mlx", "model": "quant", "checkpoint": "base", "duration": 5,
+            package = os.path.join(folder, "minimax_h3_mlx")
+            os.makedirs(package)
+            with open(os.path.join(package, "__init__.py"), "w") as file:
+                file.write("")
+            with open(os.path.join(package, "text_encoder.py"), "w") as file:
+                file.write("class MiniMaxH3TextEncoder: pass\n")
+            with open(os.path.join(folder, "config.json"), "w") as file:
+                json.dump({"quantization": {"group_size": 64, "bits": 4, "mode": "affine"},
+                           "text_encoder": {"hidden": 5120, "layers": 50, "heads": 64, "kv_heads": 8,
+                                            "head_dim": 128, "intermediate": 25600, "theta": 5000000.0}}, file)
+            request = {"runner": "minimax-h3-mlx", "model": "quant", "checkpoint": "base", "textEncoder": "encoder", "duration": 5,
                        "prompt": "-a fox", "seed": 0, "width": 768, "height": 768}
             output = io.StringIO()
             with patch.object(video.common, "settings", return_value={"minimaxSource": folder}), \
                  patch.object(video.common, "prepare_environment"), \
-                 patch.object(video, "snapshot", side_effect=lambda repo: "/cache/" + repo), \
+                 patch.object(video, "snapshot", return_value=folder), \
                  patch.object(video, "with_ai_note", side_effect=lambda source, *a, **kw: source), \
                  patch.object(video.sys, "stdin", io.StringIO(json.dumps(request))), \
                  patch.dict(os.environ), contextlib.redirect_stdout(output):

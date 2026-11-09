@@ -103,7 +103,9 @@ def command(request: dict, values: dict, output: str) -> list[str]:
 
 def minimax_command(request: dict, values: dict, output: str) -> list[str]:
     arguments = [
-        sys.executable, "-u", os.path.join(values["minimaxSource"], "scripts", "generate.py"),
+        sys.executable, "-u", os.path.join(common.HERE, "minimax_generate.py"),
+        "--source", values["minimaxSource"],
+        "--quantized-text-encoder", snapshot(request["textEncoder"]),
         "--output", output,
         "--checkpoint", os.path.join(snapshot(request["checkpoint"]), "FL2VA"),
         "--transformer", snapshot(request["model"]),
