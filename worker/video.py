@@ -41,13 +41,15 @@ BARS = [(0.05, 0.75), (0.75, 0.95)]
 PROGRESS = re.compile(r"(\d+)/(\d+) \[")
 
 
-def snapshot(repo: str) -> str:
+def snapshot(repo: str, allow_patterns: list[str] | None = None) -> str:
     from huggingface_hub import snapshot_download
 
     try:
-        return snapshot_download(repo, local_files_only=True)
-    except Exception:
-        print(f"Error: {repo} ist nicht auf der Platte; auf der Seite unter Modelle → Videos herunterladen.", flush=True)
+        # Filtered downloads intentionally omit other components in the same repository.
+        return snapshot_download(repo, local_files_only=True, allow_patterns=allow_patterns)
+    except Exception as error:
+        print(f"Error: {repo} ist lokal nicht verfügbar; auf der Seite unter Modelle → Videos herunterladen."
+              f" Ursache: {type(error).__name__}: {error}", flush=True)
         raise SystemExit(1)
 
 
@@ -102,13 +104,16 @@ def command(request: dict, values: dict, output: str) -> list[str]:
 
 
 def minimax_command(request: dict, values: dict, output: str) -> list[str]:
+    def component(repo: str) -> str:
+        return snapshot(repo, (request.get("allowPatterns") or {}).get(repo))
+
     arguments = [
         sys.executable, "-u", os.path.join(common.HERE, "minimax_generate.py"),
         "--source", values["minimaxSource"],
-        "--quantized-text-encoder", snapshot(request["textEncoder"]),
+        "--quantized-text-encoder", component(request["textEncoder"]),
         "--output", output,
-        "--checkpoint", os.path.join(snapshot(request["checkpoint"]), "FL2VA"),
-        "--transformer", snapshot(request["model"]),
+        "--checkpoint", os.path.join(component(request["checkpoint"]), "FL2VA"),
+        "--transformer", component(request["model"]),
         "--duration", str(request["duration"]),
         # The upstream CLI counts sigma grid points: nine give eight denoising forwards.
         "--steps", "17" if request.get("quality") == "high" else "9",

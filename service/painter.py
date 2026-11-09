@@ -296,6 +296,7 @@ class Painter:
             "model": model["repo"],
             "textEncoder": model["textEncoder"],
             "checkpoint": model.get("checkpoint"),
+            "allowPatterns": model.get("allowPatterns") or {},
             "duration": asked.get("duration"),
             "lowRam": asked.get("lowRam", False),
             "label": model["label"],

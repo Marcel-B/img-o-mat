@@ -782,7 +782,7 @@ class VideoTest(unittest.TestCase):
         return model
 
     def test_minimax_clip_uses_its_runner_and_keyframes(self):
-        self.prepare_minimax()
+        model = self.prepare_minimax()
         first, last = self.upload(b"\xff\xd8\xff\xe0 h3 first"), self.upload(b"\xff\xd8\xff\xe0 h3 last")
         status, body, _ = self.video(model="minimax-h3-mlx-4bit", duration=10, size="1344x768", audio=False,
                                      images=[{"file": first}, {"file": last, "at": "last"}])
@@ -792,6 +792,7 @@ class VideoTest(unittest.TestCase):
         self.assertEqual((asked["runner"], asked["checkpoint"], asked["duration"], asked["frames"], asked["audio"]),
                          ("minimax-h3-mlx", "MiniMaxAI/MiniMax-H3", 10, 243, False))
         self.assertEqual([i["at"] for i in asked["images"]], ["first", "last"])
+        self.assertEqual(asked["allowPatterns"], model["allowPatterns"])
         _, models, _ = self.call("GET", "/v1/models")
         self.assertNotIn("minimax-h3-mlx-4bit", [m["id"] for m in models["data"]])
 
@@ -873,7 +874,7 @@ class VideoTest(unittest.TestCase):
             request = {"model": "quant", "checkpoint": "base", "textEncoder": "encoder", "prompt": "fox", "duration": 15,
                        "quality": "high", "seed": 7, "width": 1344, "height": 768, "lowRam": True,
                        "images": [{"file": "a" * 64, "at": "last"}]}
-            with patch.object(video, "snapshot", side_effect=lambda repo: "/cache/" + repo):
+            with patch.object(video, "snapshot", side_effect=lambda repo, allow_patterns=None: "/cache/" + repo):
                 args = video.minimax_command(request, {"files": folder, "minimaxSource": "/runner", "minimaxStreamingSource": "/stream"}, "/out.mp4")
             for flag, value in (("--checkpoint", "/cache/base/FL2VA"), ("--transformer", "/cache/quant"),
                                 ("--steps", "17"), ("--duration", "15"), ("--anchor", "last"),
@@ -894,6 +895,22 @@ class VideoTest(unittest.TestCase):
              patch.object(launch, "run", return_value=0) as run:
             self.assertEqual(launch.main(), 0)
             run.assert_called_once_with("video.py", "/h3/python", "/scripts")
+
+    def test_minimax_offline_lookup_keeps_download_component_filters(self):
+        from types import SimpleNamespace
+        sys.path.insert(0, os.path.join(ROOT, "worker"))
+        import video
+        model = self.service.catalogue.find_video("minimax-h3-mlx-4bit")
+        request = {"model": model["repo"], "checkpoint": model["checkpoint"],
+                   "textEncoder": model["textEncoder"], "allowPatterns": model["allowPatterns"],
+                   "duration": 5, "seed": 1, "width": 768, "height": 768, "prompt": "fox"}
+        def local_snapshot(repo, *, local_files_only, allow_patterns):
+            self.assertTrue(local_files_only)
+            self.assertEqual(allow_patterns, model["allowPatterns"].get(repo))
+            return "/cache/" + repo
+        with patch.dict(sys.modules, {"huggingface_hub": SimpleNamespace(snapshot_download=local_snapshot)}):
+            args = video.minimax_command(request, {"files": "/files", "minimaxSource": "/runner"}, "/out.mp4")
+        self.assertIn("/cache/" + model["textEncoder"], args)
 
     def test_fetch_applies_the_component_filter_to_huggingface(self):
         sys.path.insert(0, os.path.join(ROOT, "worker"))
