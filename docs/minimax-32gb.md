@@ -12,6 +12,14 @@ Das Problem ist die gleichzeitige Belegung durch mehrere Komponenten, nicht alle
 | Gewichte blockweise streamen | [Argus: MiniMax auf 24 GB](https://github.com/Argus-AiTeam/minimax-h3-mac/blob/main/README_EN.md) | Der Anbieter berichtet einen Lauf auf einem M4 Pro mit 24 GB durch Streaming. Dieser Branch nutzt nun den festgelegten Argus-Streaming-Code ausschließlich in der Samplingphase, mit den vorhandenen PipeNetwork-4-Bit-Gewichten. Der veröffentlichte 24-GB-Lauf verwendet andere Gewichte und Turbo; seine Messwerte sind nicht auf unsere Variante übertragen. |
 | Textencoder auf 2 Bit reduzieren | [H3-spezifischer 2-Bit-Encoder](https://huggingface.co/antocorr/MiniMax-H3-FL2VA-MLX-Serve-2bit-text-encoder) | Rund 9,6 statt 15,8 GB laut Modellkarte, ebenfalls getrennte Phasen. Der Anbieter nennt möglichen Verlust bei Prompttreue. Vorerst nicht eingebunden: 4 Bit und die vorhandenen Gewichte bleiben erhalten. |
 
+## Initialer Download auf die T7
+
+Der Knopf unter **Modelle → Videos → MiniMax H3 (4 bit)** heißt **„Auf T7 herunterladen (53 GB)“**. Er lädt die drei benötigten Repositories mit den katalogisierten Dateifiltern. Der Dienst prüft den Speicherort vor der Warteschlange; der Worker prüft ihn erneut beim Start und vor jedem Repository. Für die bekannten H3-Repositories kann der T7-Zwang nicht durch Weglassen eines Request-Feldes ausgeschaltet werden.
+
+`/Volumes/T7` muss ein echter Mount sein; ein bloßer Ordner gleichen Namens reicht nicht. `modelCache` muss sich nach Auflösen von Symlinks auf dieser T7 befinden. Hub-, Xet-, Assets-, Blob-, Lock- und Repository-Unterordner dürfen nicht auf andere Platten umgeleitet sein. Der Worker setzt die Hugging-Face-Cachevariablen auf dieses Ziel und übergibt den Hub-Ordner außerdem explizit an den Downloader. Bei falschem Ziel entsteht kein interner Ersatzcache. Bei einem neu angelegten Modellordner wird der freie Platz der T7 geprüft, statt irrtümlich der internen SSD.
+
+Neue Worker-Konfigurationen verwenden einen bereits vorhandenen Tonwerk-Cache auf der T7 oder `/Volumes/T7/img-o-mat/models`. Bestehende Konfigurationen bleiben erhalten. Ein dort noch eingetragener interner Modellpfad sperrt den H3-Download, bis `modelCache` auf die T7 zeigt. Ein echter Download auf oi-o-mat wurde noch nicht ausgelöst.
+
 ## Implementierter Weg
 
 Bei weniger als 64 GB meldet der Videokatalog `lowRam: true`. Der Dienst erlaubt für MiniMax dann 5 Sekunden bei 768 × 768. Größere Anfragen werden vor der Warteschlange abgewiesen. Ein Anfrageparameter kann diese hardwareabhängigen Grenzen nicht ausschalten.

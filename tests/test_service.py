@@ -834,10 +834,35 @@ class VideoTest(unittest.TestCase):
         with open(os.path.join(self.root, "last-fetch.json")) as file:
             asked = json.load(file)
         self.assertEqual(asked["repos"], [model["repo"], *model["moreRepos"]])
+        self.assertEqual(asked["requiredVolume"], "T7")
         self.assertIn("FL2VA/text_encoder/config.json", asked["allowPatterns"][model["checkpoint"]])
         self.assertNotIn("FL2VA/text_encoder/*", asked["allowPatterns"][model["checkpoint"]])
         self.assertEqual(asked["allowPatterns"][model["textEncoder"]][0], "text_encoder.safetensors")
         self.assertNotIn("FL2VA/transformer/*", asked["allowPatterns"][model["checkpoint"]])
+
+    def test_minimax_download_button_requires_a_mounted_t7_target(self):
+        model = self.prepare_minimax()
+        probe = self.service.probe(fresh=True)
+        target = {**probe, "modelCacheVolume": "T7", "modelCacheMounted": True, "freeGb": 1000,
+                  "modelCacheStorageError": None, "modelCacheResolved": "/Volumes/T7/img-o-mat/models"}
+        for changed in ({"modelCacheVolume": None}, {"modelCacheMounted": False},
+                        {"modelCacheStorageError": "Ein Cache-Unterordner liegt nicht auf T7."}):
+            with patch.object(self.service, "probe", return_value={**target, **changed}):
+                status, body, _ = self.call("POST", "/v1/models/" + model["id"] + "/download")
+            self.assertEqual(status, 409, body)
+            self.assertIn("T7", body["error"]["message"])
+        with patch.object(self.service, "probe", return_value=target):
+            status, listing, _ = self.call("GET", "/v1/models?kind=video")
+            described = next(m for m in listing["data"] if m["id"] == model["id"])
+            self.assertEqual(described["storageVolume"], "T7")
+            self.assertEqual(described["downloadTarget"], target["modelCacheResolved"])
+            self.assertIsNone(described["downloadBlocked"])
+            status, body, _ = self.call("POST", "/v1/models/" + model["id"] + "/download")
+        self.assertEqual(status, 202, body)
+        until = time.time() + 5
+        while time.time() < until and self.service.downloads.state(model["id"])["state"] not in ("done", "failed"):
+            time.sleep(0.02)
+        self.assertEqual(self.service.downloads.state(model["id"])["state"], "done")
 
     def test_minimax_builds_the_offline_command_and_parses_progress(self):
         sys.path.insert(0, os.path.join(ROOT, "worker"))
@@ -884,9 +909,9 @@ class VideoTest(unittest.TestCase):
              patch.dict(sys.modules, {"huggingface_hub": SimpleNamespace(snapshot_download=download)}), \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(fetch.main(), 0)
-        self.assertEqual(download.call_args_list[0].kwargs, {"revision": None, "allow_patterns": None})
+        self.assertEqual(download.call_args_list[0].kwargs, {"cache_dir": os.path.join(folder, "hub"), "revision": None, "allow_patterns": None})
         self.assertEqual(download.call_args_list[1].kwargs,
-                         {"revision": None, "allow_patterns": ["FL2VA/text_encoder/*", "LICENSE"]})
+                         {"cache_dir": os.path.join(folder, "hub"), "revision": None, "allow_patterns": ["FL2VA/text_encoder/*", "LICENSE"]})
 
     def test_minimax_worker_runs_the_cli_and_returns_the_clip(self):
         sys.path.insert(0, os.path.join(ROOT, "worker"))

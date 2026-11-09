@@ -59,7 +59,11 @@ def main() -> int:
     values = common.settings()
     prune(values["files"])
     hub = os.path.join(values["modelCache"], "hub")
-    cache = values["modelCache"] if os.path.exists(values["modelCache"]) else common.ROOT
+    volume = common.volume_of(values["modelCache"])
+    mounted = bool(volume and os.path.ismount(os.path.join("/Volumes", volume)))
+    h3_repos = [repo for repo in asked.get("repos") or [] if common.required_download_volume([repo])]
+    cache = values["modelCache"] if os.path.exists(values["modelCache"]) else (
+        os.path.join("/Volumes", volume) if mounted else common.ROOT)
     try:
         free = shutil.disk_usage(cache).free / 1e9
     except OSError:
@@ -80,6 +84,10 @@ def main() -> int:
             "tokenFound": common.token(values) is not None,
             "files": [d for d in asked.get("files") or [] if os.path.exists(os.path.join(values["files"], d))],
             "modelCache": values["modelCache"],
+            "modelCacheResolved": os.path.realpath(values["modelCache"]),
+            "modelCacheVolume": volume,
+            "modelCacheMounted": mounted,
+            "modelCacheStorageError": common.cache_volume_error(values["modelCache"], "T7", h3_repos),
             "freeGb": round(free, 1) if free is not None else None,
         },
         sys.stdout,

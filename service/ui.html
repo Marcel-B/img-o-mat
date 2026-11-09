@@ -478,15 +478,17 @@ function modelState(m) {
     const share = m.download.fraction != null ? Math.round(m.download.fraction * 100) : null;
     return `<span>lädt herunter${share != null ? ` ${share} %` : ''} (${m.download.gb ?? 0} GB)</span><div class="bar"><div style="width:${share ?? 0}%"></div></div>`;
   }
+  if (m.downloadBlocked) return `<button disabled>Auf ${esc(m.storageVolume)} herunterladen (${m.downloadGb} GB)</button><div class="warn">${esc(m.downloadBlocked)}</div>`;
   if (!m.available) return `<span class="warn">${esc(m.unavailable)}</span>`;
   const failed = m.download?.state === 'failed' ? `<div class="danger">${esc(m.download.error)}</div>` : '';
   if (m.downloaded) return failed;
   const token = m.gated && m.tokenFound === false ? '<div class="warn">braucht einen Hugging-Face-Token</div>' : '';
-  return `<div><button data-download="${esc(m.id)}">Herunterladen (${m.downloadGb} GB)</button></div>${token}${failed}`;
+  return `<div><button data-download="${esc(m.id)}">${m.storageVolume ? `Auf ${esc(m.storageVolume)} herunterladen` : 'Herunterladen'} (${m.downloadGb} GB)</button></div>${token}${failed}`;
 }
 
 function modelBadge(m) {
   if (m.download?.state === 'running' || m.download?.state === 'waiting') return '<span class="badge">lädt</span>';
+  if (m.downloadBlocked) return '<span class="badge warn">Speicherort prüfen</span>';
   if (!m.available) return '<span class="badge warn">nicht verfügbar</span>';
   if (m.downloaded) return m.kind === 'video' ? '<span class="badge ok">heruntergeladen</span>' : '<span class="badge ok">bereit</span>';
   return '<span class="badge">nicht geladen</span>';

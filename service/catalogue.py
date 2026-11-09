@@ -38,6 +38,7 @@ FIELDS = {
     # A video model's text encoder, one of moreRepos (ltx-2-mlx takes it as --gemma).
     "textEncoder": None,
     "checkpoint": None,
+    "storageVolume": None,
     # Download only the components the runner uses, rather than duplicate/full precision weights.
     "allowPatterns": {},
     # Commits to download a repository at, where the runner itself asks for that one (rapid-mlx pins Wan's); others
@@ -164,6 +165,7 @@ VIDEOS = [
     {
         "id": "minimax-h3-mlx-4bit",
         "label": "MiniMax H3 (4 bit)",
+        "storageVolume": "T7",
         "runner": MINIMAX,
         "model": "pipenetwork/minimax-h3-mlx-4bit",
         "repo": "pipenetwork/minimax-h3-mlx-4bit",
@@ -273,6 +275,16 @@ class Catalogue:
         have = probe.get("downloaded") or {}
         return all(have.get(repo) for repo in repos(model))
 
+    def download_unavailable(self, model: dict, probe: dict | None) -> str | None:
+        volume = model.get("storageVolume")
+        if not volume:
+            return None
+        if not probe:
+            return f"Der Mac antwortet nicht; Speicherort auf {volume} kann nicht geprüft werden."
+        if probe.get("modelCacheVolume") != volume or not probe.get("modelCacheMounted"):
+            return f"Der Modellordner muss auf der angeschlossenen {volume} liegen. Kein Download auf die interne SSD."
+        return probe.get("modelCacheStorageError")
+
     def video_low_ram(self, model: dict, probe: dict | None) -> bool:
         if model["runner"] != MINIMAX:
             return False
@@ -298,6 +310,9 @@ class Catalogue:
             "tokenFound": probe.get("tokenFound") if probe else None,
             "minSystemGb": model["minSystemGb"],
             "downloadGb": model["downloadGb"],
+            "storageVolume": model.get("storageVolume"),
+            "downloadTarget": (probe or {}).get("modelCacheResolved"),
+            "downloadBlocked": self.download_unavailable(model, probe),
             "memoryGb": 26 if self.video_low_ram(model, probe) else model["memoryGb"],
             "lowRam": self.video_low_ram(model, probe),
             "paints": makes_videos(model),

@@ -52,7 +52,7 @@ class Downloads:
             try:
                 process = self.link.start("fetch")
                 asked = {"repos": repos(model), "revisions": model.get("revisions") or {}, "expectedGb": model["downloadGb"],
-                         "allowPatterns": model.get("allowPatterns") or {}}
+                         "allowPatterns": model.get("allowPatterns") or {}, "requiredVolume": model.get("storageVolume")}
                 process.stdin.write((json.dumps(asked) + "\n").encode())
                 process.stdin.flush()
                 for raw in process.stdout:

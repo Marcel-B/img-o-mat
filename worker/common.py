@@ -33,7 +33,33 @@ def volume_of(path: str) -> str | None:
     """The external disk a path lies on (/Volumes/<name>/...), followed through links: on oi-o-mat the model cache is
     a link from the Library to the T7. None for the Mac's own disk."""
     parts = os.path.realpath(path).split(os.sep)
-    return parts[2] if len(parts) > 3 and parts[1] == "Volumes" else None
+    return parts[2] if len(parts) > 2 and parts[1] == "Volumes" else None
+
+
+def required_download_volume(repositories: list[str]) -> str | None:
+    # A service request cannot disable Marcel's T7 requirement for the H3 assets.
+    h3 = {"pipenetwork/minimax-h3-mlx-4bit", "minimaxai/minimax-h3",
+          "ddalcu/minimax-h3-fl2va-mlx-serve-4bit"}
+    return "T7" if h3.intersection(repo.lower() for repo in repositories) else None
+
+
+def cache_volume_error(cache: str, volume: str, repositories: list[str] | None = None) -> str | None:
+    mount = os.path.join("/Volumes", volume)
+    if not os.path.ismount(mount):
+        return f"{volume} ist nicht angeschlossen oder nicht eingehängt. Kein Download auf die interne SSD."
+    if volume_of(cache) != volume:
+        return f"Der Modellordner muss auf {volume} liegen; eingestellt ist {os.path.realpath(cache)}."
+    hub = os.path.join(cache, "hub")
+    paths = [hub, os.path.join(cache, "xet"), os.path.join(cache, "assets"),
+             os.path.join(hub, "blobs"), os.path.join(hub, ".locks")]
+    for repo in repositories or []:
+        name = "models--" + repo.replace("/", "--")
+        root = os.path.join(hub, name)
+        paths += [root, os.path.join(root, "blobs"), os.path.join(root, "snapshots"),
+                  os.path.join(root, "refs"), os.path.join(hub, ".locks", name)]
+    if any(volume_of(path) != volume for path in paths):
+        return f"Ein Modell-Cache-Unterordner verweist außerhalb von {volume}. Download gestoppt."
+    return None
 
 
 def settings() -> dict:
@@ -125,6 +151,11 @@ def token(values: dict) -> str | None:
 def prepare_environment(values: dict) -> None:
     """Hugging Face's cache and token for this process, before anything imports huggingface_hub."""
     os.environ["HF_HOME"] = values["modelCache"]
+    # Inherited Hugging Face overrides must not redirect large model blobs or Xet data internally.
+    os.environ["HF_HUB_CACHE"] = os.path.join(values["modelCache"], "hub")
+    os.environ["HUGGINGFACE_HUB_CACHE"] = os.environ["HF_HUB_CACHE"]
+    os.environ["HF_XET_CACHE"] = os.path.join(values["modelCache"], "xet")
+    os.environ["HF_ASSETS_CACHE"] = os.path.join(values["modelCache"], "assets")
     os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
     os.environ["TQDM_DISABLE"] = "1"
     if found := token(values):

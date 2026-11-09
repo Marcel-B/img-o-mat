@@ -106,8 +106,10 @@ PYTHONPATH="$ROOT/minimax-h3-streaming" "$ROOT/minimax/bin/python" -c 'from mini
 
 cp "$HERE"/worker/*.py "$ROOT/worker/"
 if [ ! -f "$ROOT/worker.json" ]; then
-  CACHE="$ROOT/models"
-  [ -e "$TONWERK_CACHE" ] && CACHE="$TONWERK_CACHE"
+  CACHE="/Volumes/T7/img-o-mat/models"
+  if [ -e "$TONWERK_CACHE" ] && /usr/bin/python3 -c 'import os, sys; sys.exit(not os.path.realpath(sys.argv[1]).startswith("/Volumes/T7/"))' "$TONWERK_CACHE"; then
+    CACHE="$TONWERK_CACHE"
+  fi
   /usr/bin/python3 -c 'import json, sys; json.dump({"modelCache": sys.argv[1]}, open(sys.argv[2], "w"), indent=2)' "$CACHE" "$ROOT/worker.json"
   echo "Modelle in $CACHE"
 fi

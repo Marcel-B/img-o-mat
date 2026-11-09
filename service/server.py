@@ -612,6 +612,8 @@ class Handler(BaseHTTPRequestHandler):
             probe = service.probe(fresh=True)
             if probe is None:
                 raise RequestError(502, service.link.probe_error or "Der Mac, der malt, antwortet nicht.")
+            if reason := service.catalogue.download_unavailable(model, probe):
+                raise RequestError(409, reason)
             if probe.get("freeGb") is not None and probe["freeGb"] < model["downloadGb"] + float(service.config.get("minFreeGb", 20)):
                 raise RequestError(507, f"Auf {probe.get('modelCache')} sind nur {probe['freeGb']} GB frei, {model['label']} braucht {model['downloadGb']} GB.")
             self.send_json(202, service.downloads.start(model))
