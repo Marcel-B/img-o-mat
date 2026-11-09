@@ -129,6 +129,10 @@
   dialog.promptedit .row { justify-content: flex-end; gap: 10px; }
   dialog.promptedit .row .hint { margin: 0 auto 0 0; }
   @media (max-width: 640px) { dialog.promptedit { width: 100vw; height: 100vh; height: 100dvh; border: 0; border-radius: 0; padding: 12px; } dialog.promptedit .keys { display: none; } }
+  /* Only for models whose runner heeds one (GET /v1/models "negativePrompt"); small, the prompt stays the main field. */
+  .promptbar .negative { margin-top: 8px; }
+  .promptbar .negative label { display: flex; justify-content: space-between; gap: 8px; }
+  .promptbar .negative textarea, .paint .promptbar .negative textarea { min-height: 0; height: 3.4em; flex: none; resize: vertical; }
   .promptbar.dropping { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .loras .check { align-items: flex-start; }
   .loras .check input { margin-top: 3px; }
@@ -279,6 +283,10 @@
         </div>
       </div>
       <textarea id="prompt" maxlength="2000" placeholder="a red fox in fresh snow, morning light, 35 mm photo"></textarea>
+      <div class="negative" id="negativeBox" hidden>
+        <label for="negative"><span>Negativprompt · was nicht ins Bild soll</span><span class="muted" id="negativeHint"></span></label>
+        <textarea id="negative" maxlength="2000" placeholder="blurry, watermark, text, extra fingers"></textarea>
+      </div>
       <div class="row promptfoot">
         <button class="primary" id="paint">Malen</button>
         <button id="cancel" hidden>Abbrechen</button>
@@ -499,7 +507,7 @@ function modelCard(m) {
   const video = m.kind === 'video';
   return `<div class="card item">
     <div class="top"><div><div class="name">${esc(m.label)}</div>
-      <div class="tags">${video ? `<span>${esc(m.runner)}</span>` : ''}${m.lettering ? '<span>Schrift</span>' : ''}${m.loras ? '<span>LoRAs</span>' : ''}${m.references ? `<span>${m.references} Referenzen</span>` : ''}${m.startImage ? '<span>Startbild</span>' : ''}${m.contentFilter ? '<span>Inhaltsfilter</span>' : ''}${m.minSystemGb ? `<span>ab ${m.minSystemGb} GB</span>` : ''}</div></div>
+      <div class="tags">${video ? `<span>${esc(m.runner)}</span>` : ''}${m.lettering ? '<span>Schrift</span>' : ''}${m.loras ? '<span>LoRAs</span>' : ''}${m.references ? `<span>${m.references} Referenzen</span>` : ''}${m.startImage ? '<span>Startbild</span>' : ''}${m.negativePrompt ? '<span>Negativprompt</span>' : ''}${m.contentFilter ? '<span>Inhaltsfilter</span>' : ''}${m.minSystemGb ? `<span>ab ${m.minSystemGb} GB</span>` : ''}</div></div>
       ${modelBadge(m)}</div>
     <dl class="facts">
       <dt>Lizenz</dt><dd>${esc(m.license)}</dd>
@@ -533,6 +541,10 @@ function renderPicks() {
   $('loraPicks').innerHTML = fitting.length
     ? '<span class="label">LoRAs (bis zu 3)</span>' + fitting.map(l => `<label class="check" title="${esc(l.label)}${l.trigger ? ' · ' + esc(l.trigger) : ''}"><input type="checkbox" value="${esc(l.name)}" ${picked.has(l.name) ? 'checked' : ''}><span><span class="clip">${esc(l.label)}</span>${l.trigger ? `<small class="clip">${esc(l.trigger)}</small>` : ''}</span></label>`).join('')
     : '';
+  // The distilled models paint without CFG, where a negative prompt does nothing; the field shows only where it acts,
+  // and its text stays for when such a model is picked again.
+  $('negativeBox').hidden = !model?.negativePrompt;
+  $('negativeHint').textContent = model?.negativePrompt ? `${model.label} malt damit etwa doppelt so lange` : '';
   renderRefs();
 }
 
@@ -854,10 +866,11 @@ async function paint() {
     return { name, label: lora?.label || name, strength: lora?.strength ?? null };
   }) });
   if ($('seed').value.trim()) body.seed = Number($('seed').value);
+  if (model?.negativePrompt && $('negative').value.trim()) body.negative_prompt = $('negative').value.trim();
   if (usable.length && model.startImage) body.references = [{ file: usable[0].sha, role: 'start', strength: Number($('refStrength').value) }];
   else if (usable.length) body.references = usable.map(r => ({ file: r.sha }));
   if (!body.size) body.size = '1024x1024';
-  try { localStorage.setItem('img-o-mat.form', JSON.stringify({ model: body.model, prompt: body.prompt, size: body.size, n: body.n })); } catch {}
+  try { localStorage.setItem('img-o-mat.form', JSON.stringify({ model: body.model, prompt: body.prompt, negative: $('negative').value, size: body.size, n: body.n })); } catch {}
   const job = { id: ++jobSeq, body, state: 'waiting' };
   jobs.push(job);
   note = '';
@@ -937,7 +950,7 @@ function handle(name, data, job) {
     // What Speichern sends along, so the gallery can say what the picture was.
     Object.assign(figure.dataset, { model: body.model, seed: data.seed, size: body.size, prompt: data.revised_prompt || body.prompt });
     figure.dataset.meta = JSON.stringify({
-      model: body.model, prompt: body.prompt, paintedPrompt: data.revised_prompt || null, seed: data.seed, size: body.size,
+      model: body.model, prompt: body.prompt, negativePrompt: body.negative_prompt || null, paintedPrompt: data.revised_prompt || null, seed: data.seed, size: body.size,
       loras: body.loraDetails || [], references: body.references || [],
     });
     figure.style.setProperty('--ratio', body.size.replace('x', ' / '));
@@ -999,6 +1012,7 @@ function renderCaption(figure) {
   caption.className = 'caption details';
   const label = models.find(m => m.id === meta.model)?.label || meta.model || '?';
   const rows = [['Modell', esc(label)]];
+  if (meta.negativePrompt) rows.push(['Nicht im Bild', esc(meta.negativePrompt)]);
   if (meta.size) rows.push(['Größe', esc(meta.size.replace('x', ' × '))]);
   if (meta.seed != null) rows.push(['Seed', esc(meta.seed)]);
   if (meta.loras?.length) rows.push(['LoRAs', meta.loras.map(l => `${esc(l.label || l.name)}${l.strength != null ? ' · ' + esc(l.strength) : ''}`).join('<br>')]);
@@ -1021,6 +1035,7 @@ function renderCaption(figure) {
 async function reuse(meta, given = null) {
   if (meta.model && models.some(m => m.id === meta.model && m.available)) $('model').value = meta.model;
   if (meta.prompt) $('prompt').value = meta.prompt;
+  $('negative').value = meta.negativePrompt || '';
   $('seed').value = meta.seed ?? '';
   if (meta.size) {
     if (![...$('size').options].some(o => o.value === meta.size)) {
@@ -1076,7 +1091,7 @@ async function refine(figure) {
   const seed = meta.seed ?? (figure.dataset.seed ? Number(figure.dataset.seed) : null);
   // The LoRAs belong to the first model; the picture is the only start, at the size it was painted in.
   await reuse({
-    model: model.id, prompt: meta.prompt || figure.dataset.prompt || $('prompt').value, seed,
+    model: model.id, prompt: meta.prompt || figure.dataset.prompt || $('prompt').value, negativePrompt: meta.negativePrompt, seed,
     size: meta.size || figure.dataset.size, loras: [], references: [{ role: 'start', strength: REFINE_STRENGTH }],
   }, [blob]);
   paint();
@@ -1153,7 +1168,7 @@ $('previewSave').addEventListener('click', async () => {
       method: 'POST', headers: { 'content-type': 'application/json', 'x-llm-app': 'img-o-mat' },
       body: JSON.stringify({
         b64_json: figure.querySelector('img').src.split(',')[1], model, seed: Number(seed), size, creator: 'img-o-mat',
-        prompt: meta.prompt ?? prompt, paintedPrompt: meta.paintedPrompt, loras: meta.loras, references: meta.references,
+        prompt: meta.prompt ?? prompt, negativePrompt: meta.negativePrompt, paintedPrompt: meta.paintedPrompt, loras: meta.loras, references: meta.references,
       }),
     });
     figure.dataset.saved = saved.name;
@@ -1500,6 +1515,9 @@ try {
 $('prompt').addEventListener('keydown', event => {
   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); $('promptDialog').close(); paint(); }
 });
+$('negative').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); paint(); }
+});
 // The large prompt: the textarea itself moves into the dialog and back on every way out (Esc included).
 const promptHome = $('refs');
 function promptCount() { $('promptCount').textContent = $('prompt').value.length; }
@@ -1555,6 +1573,7 @@ $('loraUpload').addEventListener('click', async () => {
 try {
   const saved = JSON.parse(localStorage.getItem('img-o-mat.form') || '{}');
   if (saved.prompt) $('prompt').value = saved.prompt;
+  if (saved.negative) $('negative').value = saved.negative;
   if (saved.size && [...$('size').options].some(o => o.value === saved.size)) $('size').value = saved.size;
   if (saved.n) $('n').value = saved.n;
   load().then(() => { if (saved.model && models.some(m => m.id === saved.model && m.available)) { $('model').value = saved.model; renderPicks(); } });

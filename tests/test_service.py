@@ -317,6 +317,61 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(self.call("DELETE", "/v1/loras/Fuchs")[0], 200)
         self.assertEqual(self.call("DELETE", "/v1/loras/Fuchs")[0], 404)
 
+    def test_negative_prompts_only_where_the_model_heeds_them(self):
+        for model_id in ("klein-4b", "klein-9b", "z-image-turbo", "flux3-klein"):
+            with self.subTest(model=model_id):
+                self.assertFalse(self.model(model_id)["negativePrompt"])
+        self.assertTrue(self.model("krea-2-turbo")["negativePrompt"])
+        status, body, _ = self.paint(negative_prompt="blurry")
+        self.assertEqual(status, 400)
+        self.assertIn("Negativprompt", body["error"]["message"])
+        # Blank is no negative prompt, so a client sending an empty field still paints.
+        status, body, _ = self.paint(negative_prompt="  ")
+        self.assertEqual(status, 200, body)
+        self.assertIsNone(self.last_request()["negativePrompt"])
+
+        self.service.config["systemMemoryGb"] = 32
+        self.addCleanup(self.service.config.__setitem__, "systemMemoryGb", 24)
+        status, body, _ = self.paint(model="krea-2-turbo", negative_prompt=" blurry, watermark ")
+        self.assertEqual(status, 200, body)
+        sent = self.last_request()
+        self.assertEqual((sent["negativePrompt"], sent["guidance"]), ("blurry, watermark", 2.0))
+        # Without one, Krea 2 Turbo keeps its distilled guidance.
+        status, body, _ = self.paint(model="krea-2-turbo")
+        self.assertEqual(status, 200, body)
+        self.assertEqual((self.last_request()["negativePrompt"], self.last_request()["guidance"]), (None, None))
+        status, body, _ = self.paint(model="krea-2-turbo", negative_prompt="x" * 2001)
+        self.assertEqual(status, 400)
+
+    def test_the_runner_gets_the_negative_prompt_with_true_cfg(self):
+        sys.path.insert(0, os.path.join(ROOT, "worker"))
+        import paint
+
+        class Model:
+            callbacks = type("Callbacks", (), {"register": lambda self, callback: None})()
+
+            def generate_image(self, **arguments):
+                self.arguments = arguments
+                return type("Generated", (), {"image": None})()
+
+        base = {"model": "krea-2", "prompt": "a fox", "seed": 1, "references": []}
+        model = Model()
+        paint.paint_mflux(model, {**base, "negativePrompt": "blurry", "guidance": 2.0}, 8)
+        self.assertEqual((model.arguments["negative_prompt"], model.arguments["guidance"]), ("blurry", 2.0))
+        paint.paint_mflux(model, base, 8)
+        self.assertNotIn("negative_prompt", model.arguments)
+        self.assertEqual(model.arguments["guidance"], 1.0)
+        # Klein's mflux pipeline has no argument for it; nothing reaches it even if a request carried one.
+        paint.paint_mflux(model, {**base, "model": "flux2-klein-4b", "negativePrompt": "blurry", "guidance": 2.0}, 4)
+        self.assertNotIn("negative_prompt", model.arguments)
+        self.assertEqual(model.arguments["guidance"], 1.0)
+
+    def test_the_page_offers_a_negative_prompt(self):
+        _, page, _ = self.call("GET", "/")
+        page = page.decode()
+        for part in ('id="negativeBox"', 'id="negative"', "body.negative_prompt", "model?.negativePrompt"):
+            self.assertIn(part, page)
+
     def test_loras_reach_the_runner_with_their_extension(self):
         # mlx infers the format from the extension; files are named by their hash alone.
         sys.path.insert(0, os.path.join(ROOT, "worker"))

@@ -57,6 +57,11 @@ FIELDS = {
     "minSystemGb": None,
     # It can write short words into the picture.
     "lettering": False,
+    # The guidance (true CFG) it paints at when a request brings a negative prompt; None where the runner would ignore
+    # one. A negative prompt only acts through classifier-free guidance, which the distilled models skip: mflux forces
+    # Z-Image Turbo's to 0 and gives FLUX.2 Klein a fixed blank one, flux3-mlx refuses guidance for FLUX 3 Klein. Krea 2
+    # Turbo takes it (mflux encodes the negative branch once guidance is not 1), at twice the transformer passes per step.
+    "negativeGuidance": None,
     "downloadGb": 0,
     # Roughly what it holds while painting; the LLM gate checks free memory by it.
     "memoryGb": 0,
@@ -114,6 +119,8 @@ DEFAULTS = [
         "repo": "krea/Krea-2-Turbo",
         "quantize": 8,
         "steps": 8,
+        # Not measured: low enough that eight distilled steps do not burn, high enough for the negative prompt to show.
+        "negativeGuidance": 2.0,
         "contentFilter": True,
         "minSystemGb": 32,
         "lettering": True,
@@ -224,6 +231,10 @@ def max_references(model: dict) -> int:
 def takes_start_image(model: dict) -> bool:
     """Z-Image and Krea 2 paint over a start picture instead (img2img), keeping its layout by a strength."""
     return model["runner"] == MFLUX and model["model"].startswith(("z-image", "krea-2"))
+
+
+def takes_negative_prompt(model: dict) -> bool:
+    return bool(model.get("negativeGuidance")) and model["runner"] == MFLUX and model["model"].startswith("krea-2")
 
 
 def makes_videos(model: dict) -> bool:
@@ -347,6 +358,7 @@ class Catalogue:
             "loras": takes_loras(model),
             "references": max_references(model),
             "startImage": takes_start_image(model),
+            "negativePrompt": takes_negative_prompt(model),
             "downloaded": self.downloaded(model, probe),
             "download": download,
             "available": reason is None,

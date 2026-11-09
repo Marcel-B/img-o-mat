@@ -210,6 +210,9 @@ class Painter:
             # Always the catalogue's: the licences ask for the filter, no client may leave it out.
             "contentFilter": model["contentFilter"],
             "prompt": job.request["prompt"],
+            # Only with a negative prompt: without one Krea 2 Turbo stays at its distilled guidance of 1, at full speed.
+            "negativePrompt": job.request.get("negativePrompt"),
+            "guidance": model["negativeGuidance"] if job.request.get("negativePrompt") else None,
             "seed": seed,
             "width": job.request["width"],
             "height": job.request["height"],
