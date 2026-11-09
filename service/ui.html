@@ -159,10 +159,10 @@
   .pictures img { width: 100%; display: block; background: var(--line); aspect-ratio: var(--ratio, 1); object-fit: cover; }
   .pictures figcaption { font-size: 12px; color: var(--muted); padding: 8px 10px 10px; word-break: break-word; }
   .pictures figcaption .prompt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; }
-  .pictures .frame { position: relative; }
+  .pictures .frame, .clips .frame { position: relative; }
   .pictures .frame img { cursor: zoom-in; }
-  .pictures .enlarge { position: absolute; top: 8px; right: 8px; width: 34px; height: 34px; padding: 0; border-radius: 8px; border: 0; background: rgba(0, 0, 0, .55); color: #fff; font-size: 18px; line-height: 34px; }
-  .pictures .enlarge:hover, .pictures .enlarge:focus-visible { background: rgba(0, 0, 0, .8); }
+  .pictures .enlarge, .clips .enlarge { position: absolute; top: 8px; right: 8px; width: 34px; height: 34px; padding: 0; border-radius: 8px; border: 0; background: rgba(0, 0, 0, .55); color: #fff; font-size: 18px; line-height: 34px; }
+  .pictures .enlarge:hover, .pictures .enlarge:focus-visible, .clips .enlarge:hover, .clips .enlarge:focus-visible { background: rgba(0, 0, 0, .8); }
   .pictures .pending .frame { aspect-ratio: var(--ratio, 1); background: linear-gradient(100deg, var(--sunken) 30%, var(--line) 50%, var(--sunken) 70%) 0 0 / 300% 100%; animation: shimmer 1.6s linear infinite; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
   .pictures .pending .frame .enlarge { font-size: 20px; }
   .pictures .pending.waiting .frame { animation: none; background: var(--sunken); }
@@ -197,7 +197,7 @@
   dialog.preview[open] { display: flex; flex-direction: column; gap: 10px; }
   dialog.preview::backdrop { background: rgba(0, 0, 0, .6); }
   dialog.preview .stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; gap: 8px; }
-  dialog.preview .stage img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; min-width: 0; }
+  dialog.preview .stage img, dialog.preview .stage video { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; min-width: 0; }
   dialog.preview .step { flex: none; font-size: 22px; width: 40px; height: 56px; padding: 0; background: rgba(255, 255, 255, .1); color: inherit; border: 0; }
   dialog.preview .caption { font-size: 13px; color: #b5b5bd; text-align: center; max-height: 5.5em; overflow: auto; word-break: break-word; }
   dialog.preview .caption .prompt { display: block; }
@@ -428,6 +428,7 @@
   <div class="stage">
     <button class="step" id="previewPrev" aria-label="Vorheriges Bild">‹</button>
     <img id="previewImage" alt="">
+    <video id="previewClip" controls loop playsinline hidden></video>
     <button class="step" id="previewNext" aria-label="Nächstes Bild">›</button>
   </div>
   <div class="caption" id="previewCaption"></div>
@@ -937,6 +938,16 @@ function cancelJob(job) {
   // Not taken yet: the server's answer brings the id, and run() cancels it then.
 }
 
+// How long something took, for people: 8 s, 4 min 12 s, 1 h 5 min.
+function took(seconds) {
+  if (seconds == null || isNaN(seconds)) return null;
+  const s = Math.round(Number(seconds));
+  if (s < 90) return `${s} s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return s % 60 ? `${m} min ${s % 60} s` : `${m} min`;
+  return m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${Math.floor(m / 60)} h`;
+}
+
 function refCaption(body) {
   const given = body.references || [];
   if (!given.length) return '';
@@ -958,11 +969,11 @@ function handle(name, data, job) {
     Object.assign(figure.dataset, { model: body.model, seed: data.seed, size: body.size, prompt: data.revised_prompt || body.prompt });
     figure.dataset.meta = JSON.stringify({
       model: body.model, prompt: body.prompt, negativePrompt: body.negative_prompt || null, paintedPrompt: data.revised_prompt || null, seed: data.seed, size: body.size,
-      loras: body.loraDetails || [], references: body.references || [],
+      loras: body.loraDetails || [], references: body.references || [], loadSeconds: data.loadSeconds ?? null, paintSeconds: data.paintSeconds ?? null,
     });
     figure.style.setProperty('--ratio', body.size.replace('x', ' / '));
     figure.innerHTML = `<div class="frame"><img src="${url}" alt=""><button class="enlarge" data-enlarge title="Groß ansehen" aria-label="Groß ansehen">⤢</button></div>
-      <figcaption>${esc(body.model)} · Seed ${data.seed} · ${data.paintSeconds ?? '?'} s${refCaption(body)}${data.revised_prompt ? '<span class="prompt">' + esc(data.revised_prompt) + '</span>' : ''}</figcaption>`;
+      <figcaption>${esc(body.model)} · Seed ${data.seed} · ${took(data.paintSeconds) ?? '?'}${refCaption(body)}${data.revised_prompt ? '<span class="prompt">' + esc(data.revised_prompt) + '</span>' : ''}</figcaption>`;
     // A finished picture takes the place of its job's last placeholder, so the order stays the order of painting.
     const pending = jobFigures(job);
     if (pending.length) pending[pending.length - 1].replaceWith(figure); else $('pictures').prepend(figure);
@@ -981,11 +992,12 @@ function handle(name, data, job) {
 // T7; the gallery's pictures live only there. The preview serves both and steps within the grid it was opened from.
 let shown = null;
 const inGallery = figure => figure.closest('#galleryGrid') !== null;
-const figures = (from = shown) => [...(from && inGallery(from) ? $('galleryGrid') : $('pictures')).querySelectorAll('figure:not(.pending)')];
+const isClip = figure => figure.closest('#clips') !== null;
+const figures = (from = shown) => [...(from?.closest('#galleryGrid, #clips') || $('pictures')).querySelectorAll('figure:not(.pending)')];
 
 function renderSave(figure) {
   const button = $('previewSave');
-  button.hidden = inGallery(figure);
+  button.hidden = inGallery(figure) || isClip(figure);
   button.disabled = !!figure.dataset.saved;
   button.textContent = figure.dataset.saved ? `Gespeichert${galleryDisk ? ' auf ' + galleryDisk : ''} ✓` : `Speichern${galleryDisk ? ' auf ' + galleryDisk : ''}`;
 }
@@ -993,8 +1005,20 @@ function renderSave(figure) {
 function show(figure) {
   if (!figure) return;
   shown = figure;
+  const clip = isClip(figure);
   const url = figure.dataset.full || figure.querySelector('img').src;
-  $('previewImage').src = url;
+  $('previewImage').hidden = clip; $('previewClip').hidden = !clip;
+  if (clip) {
+    figure.querySelector('video').pause();
+    $('previewImage').removeAttribute('src');
+    if ($('previewClip').getAttribute('src') !== url) { $('previewClip').src = url; $('previewClip').play().catch(() => {}); }
+  } else {
+    $('previewClip').pause(); $('previewClip').removeAttribute('src');
+    $('previewImage').src = url;
+  }
+  for (const id of ['previewRef', 'previewVideo']) $(id).hidden = clip;
+  $('previewPrev').setAttribute('aria-label', clip ? 'Vorheriger Clip' : 'Vorheriges Bild');
+  $('previewNext').setAttribute('aria-label', clip ? 'Nächster Clip' : 'Nächstes Bild');
   renderCaption(figure);
   $('previewDownload').href = url;
   $('previewDownload').download = figure.dataset.file;
@@ -1011,6 +1035,7 @@ const metaOf = figure => { try { return JSON.parse(figure.dataset.meta || 'null'
 function renderCaption(figure) {
   const meta = metaOf(figure);
   const caption = $('previewCaption');
+  if (isClip(figure)) { renderClipCaption(meta); return; }
   $('previewReuse').hidden = !meta;
   const by = refiner();
   $('previewRefine').hidden = !by;
@@ -1022,6 +1047,7 @@ function renderCaption(figure) {
   if (meta.negativePrompt) rows.push(['Nicht im Bild', esc(meta.negativePrompt)]);
   if (meta.size) rows.push(['Größe', esc(meta.size.replace('x', ' × '))]);
   if (meta.seed != null) rows.push(['Seed', esc(meta.seed)]);
+  if (meta.paintSeconds != null) rows.push(['Dauer', esc(took((meta.loadSeconds || 0) + meta.paintSeconds)) + (meta.loadSeconds >= 1 ? ` <span class="muted">(${esc(took(meta.paintSeconds))} gemalt, ${esc(took(meta.loadSeconds))} Modell geladen)</span>` : '')]);
   if (meta.loras?.length) rows.push(['LoRAs', meta.loras.map(l => `${esc(l.label || l.name)}${l.strength != null ? ' · ' + esc(l.strength) : ''}`).join('<br>')]);
   if (figure.dataset.saved || meta.savedAt) {
     const when = meta.savedAt ? new Date(meta.savedAt.replace(/([+-]\d\d)(\d\d)$/, '$1:$2')) : null;
@@ -1036,6 +1062,23 @@ function renderCaption(figure) {
     ${meta.paintedPrompt && meta.paintedPrompt !== meta.prompt ? `<details><summary>So hat es das Modell erweitert</summary><div class="said">${esc(meta.paintedPrompt)}</div></details>` : ''}
     <dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
     ${from ? `<div><div>${meta.references[0].role === 'start' ? 'Gemalt über' : 'Vorlagen'}</div><div class="from">${from}</div></div>` : ''}`;
+}
+
+// A clip's caption: what it was made with and how long that took. Its pictures live on this page like the clip.
+function renderClipCaption(meta) {
+  const caption = $('previewCaption');
+  $('previewReuse').hidden = true; $('previewRefine').hidden = true;
+  caption.className = 'caption details';
+  const label = videoModels.find(m => m.id === meta.model)?.label || meta.model || '?';
+  const rows = [['Modell', esc(label)], ['Länge', `${esc(meta.seconds)} s`], ['Größe', esc((meta.size || '?').replace('x', ' × '))], ['Seed', esc(meta.seed ?? '?')]];
+  if (meta.quality) rows.push(['Qualität', esc(meta.quality === 'high' ? 'gut' : 'schnell')]);
+  if (meta.audio) rows.push(['Ton', 'ja']);
+  const spent = meta.paintSeconds ?? meta.waitedSeconds;
+  if (spent != null) rows.push(['Dauer', esc(took(spent)) + (meta.paintSeconds != null && meta.waitedSeconds - meta.paintSeconds >= 30 ? ` <span class="muted">(mit Warten und Übertragen ${esc(took(meta.waitedSeconds))})</span>` : '')]);
+  const from = (meta.images || []).map(i => `<figure>${i.url ? `<img src="${esc(i.url)}" alt="">` : '<div class="gone">–</div>'}${i.at === 'first' ? 'Anfang' : 'Ende'}</figure>`).join('');
+  caption.innerHTML = `${meta.prompt ? `<div class="said">${esc(meta.prompt)}</div>` : ''}
+    <dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
+    ${from ? `<div><div>Bilder</div><div class="from">${from}</div></div>` : ''}`;
 }
 
 // Puts what a picture was painted with back into the paint view, to paint it again or change one thing.
@@ -1109,7 +1152,7 @@ function step(by) {
   show(all[all.indexOf(shown) + by]);
 }
 
-for (const grid of ['pictures', 'galleryGrid']) {
+for (const grid of ['pictures', 'galleryGrid', 'clips']) {
   $(grid).addEventListener('click', event => {
     const figure = event.target.closest('figure:not(.pending)');
     if (figure && event.target.closest('img, [data-enlarge]')) show(figure);
@@ -1176,6 +1219,7 @@ $('previewSave').addEventListener('click', async () => {
       body: JSON.stringify({
         b64_json: figure.querySelector('img').src.split(',')[1], model, seed: Number(seed), size, creator: 'img-o-mat',
         prompt: meta.prompt ?? prompt, negativePrompt: meta.negativePrompt, paintedPrompt: meta.paintedPrompt, loras: meta.loras, references: meta.references,
+        loadSeconds: meta.loadSeconds, paintSeconds: meta.paintSeconds,
       }),
     });
     figure.dataset.saved = saved.name;
@@ -1217,8 +1261,9 @@ $('previewRef').addEventListener('click', async () => {
 });
 $('previewDelete').addEventListener('click', async () => {
   if (!shown) return;
-  const gallery = inGallery(shown);
-  const question = gallery ? `Bild aus der Galerie${galleryDisk ? ' auf ' + galleryDisk : ''} löschen? Das lässt sich nicht zurückholen.`
+  const gallery = inGallery(shown), clip = isClip(shown);
+  const question = clip ? 'Clip von dieser Seite nehmen? Wenn du ihn nicht heruntergeladen hast, ist er weg.'
+    : gallery ? `Bild aus der Galerie${galleryDisk ? ' auf ' + galleryDisk : ''} löschen? Das lässt sich nicht zurückholen.`
     : shown.dataset.saved ? 'Bild von dieser Seite nehmen? In der Galerie bleibt es.'
     : 'Bild löschen? Es ist nur auf dieser Seite und lässt sich nicht zurückholen.';
   if (!confirm(question)) return;
@@ -1227,23 +1272,30 @@ $('previewDelete').addEventListener('click', async () => {
     try { await api(`/v1/gallery/${shown.dataset.name}`, { method: 'DELETE' }); }
     catch (error) { alert(error.message); return; }
   }
+  if (clip) { $('previewClip').removeAttribute('src'); URL.revokeObjectURL(shown.dataset.full); }
   shown.remove();
   updateEmpty(); updateGalleryEmpty();
+  $('clipsEmpty').hidden = !!$('clips').querySelector('figure');
   const next = all[at + 1] || all[at - 1];
   if (next) show(next); else $('preview').close();
 });
 $('preview').addEventListener('click', event => {
   if (event.target === $('preview') || event.target.classList.contains('stage')) $('preview').close();
 });
-$('preview').addEventListener('close', () => { shown = null; $('previewImage').removeAttribute('src'); });
+$('preview').addEventListener('close', () => {
+  shown = null; $('previewImage').removeAttribute('src');
+  $('previewClip').pause(); $('previewClip').removeAttribute('src');
+});
 document.addEventListener('keydown', event => {
   if (!$('preview').open) return;
+  // The clip has the focus when the preview opens; the arrows step to the next clip there too, instead of winding it.
+  if (event.target === $('previewClip') && ['ArrowLeft', 'ArrowRight'].includes(event.key)) event.preventDefault();
   if (event.key === 'ArrowLeft') step(-1);
   if (event.key === 'ArrowRight') step(1);
 });
 
 document.addEventListener('click', async event => {
-  if (event.target.closest('#preview, #pictures, #galleryGrid')) return;
+  if (event.target.closest('#preview, #pictures, #galleryGrid, #clips')) return;
   const target = event.target.closest('button');
   if (!target) return;
   try {
@@ -1460,10 +1512,9 @@ async function makeVideo() {
           $('videoState').textContent = `${videoStages[event.stage] || event.stage} ${Math.round(event.fraction * 100)} % · ${minutes} min`;
           $('videoBar').firstElementChild.style.width = `${Math.round(event.fraction * 100)}%`;
         }
-        if (name === 'video') addClip(event, body, seed);
+        if (name === 'video') addClip(event, body, seed, (Date.now() - started) / 1000);
         if (name === 'done') {
-          const took = Math.round((Date.now() - started) / 1000);
-          $('videoState').textContent = `fertig nach ${took < 90 ? took + ' s' : Math.round(took / 60) + ' min'}`;
+          $('videoState').textContent = `fertig nach ${took((Date.now() - started) / 1000)}`;
           $('videoBar').hidden = true;
         }
         if (name === 'error') throw new Error(event.error.message);
@@ -1477,13 +1528,22 @@ async function makeVideo() {
   }
 }
 
-function addClip(data, body, seed) {
+// waited: from asking to the clip, queue and transfer included; the worker's paintSeconds is the filming alone.
+function addClip(data, body, seed, waited) {
   const bytes = Uint8Array.from(atob(data.b64_mp4), c => c.charCodeAt(0));
   const url = URL.createObjectURL(new Blob([bytes], { type: 'video/mp4' }));
   const figure = document.createElement('figure');
   const seconds = body.duration ?? Math.round((body.frames - 1) / 24);
-  figure.innerHTML = `<video src="${url}" controls loop playsinline></video>
-    <figcaption><span>${esc(body.model)} · ${seconds} s · ${esc(body.size)} · Seed ${data.seed ?? seed}</span>
+  const spent = took(data.paintSeconds ?? waited);
+  figure.dataset.full = url;
+  figure.dataset.file = `img-o-mat-${body.model}-${data.seed ?? seed}.mp4`;
+  figure.dataset.meta = JSON.stringify({
+    model: body.model, prompt: body.prompt, size: body.size, seconds, seed: data.seed ?? seed, quality: body.quality, audio: body.audio,
+    paintSeconds: data.paintSeconds ?? null, waitedSeconds: waited,
+    images: (body.images || []).map(i => ({ at: i.at, url: slots[i.at]?.sha === i.file ? slots[i.at].url : null })),
+  });
+  figure.innerHTML = `<div class="frame"><video src="${url}" controls loop playsinline></video><button class="enlarge" data-enlarge title="Groß ansehen, mit Pfeilen zum nächsten Clip" aria-label="Groß ansehen">⤢</button></div>
+    <figcaption><span>${esc(body.model)} · ${seconds} s · ${esc(body.size)} · Seed ${data.seed ?? seed}${spent ? ' · gefilmt in ' + esc(spent) : ''}</span>
       <a href="${url}" download="img-o-mat-${esc(body.model)}-${data.seed ?? seed}.mp4">Herunterladen</a>
       <span class="prompt">${esc(body.prompt)}</span></figcaption>`;
   $('clipsEmpty').hidden = true;
