@@ -1,5 +1,6 @@
 #!/bin/sh
-# Sets up the Mac that paints (oi-o-mat): two Python environments with the runners, the worker scripts and
+# Sets up the Mac that paints (oi-o-mat): three Python environments with the runners (mflux, flux3-mlx, ltx-2-mlx
+# for video clips), the worker scripts and
 # worker.json, under ~/Library/Application Support/img-o-mat. The service (on Proxmox, deploy/to-proxmox.sh) starts
 # them over SSH; nothing runs here between pictures.
 #
@@ -34,6 +35,10 @@ FLUX3="flux3-mlx[pup]==0.1.0"
 PILLOW="pillow<13"
 # The content filter (Falconsai's classifier through transformers) needs torch; flux3-mlx does not bring it.
 TORCH="torch==2.14.0"
+# ltx-2-mlx is not on PyPI: its two packages from the repository at a fixed commit (0.18.0, 2026-11-01). It writes the
+# mp4 with Homebrew's ffmpeg.
+LTX_COMMIT="747b30ef10e92a011e85b2aa0f6c4ee86ced5218"
+LTX_GIT="git+https://github.com/dgrauet/ltx-2-mlx@$LTX_COMMIT"
 
 BASE=""
 if ! command -v uv >/dev/null 2>&1; then
@@ -66,6 +71,17 @@ install "$ROOT/env/bin/python" "$PACKAGE" "$PILLOW"
 "$ROOT/env/bin/python" -c 'import importlib.metadata as m; from mflux.models.flux2.variants import Flux2Klein; from mflux.models.krea2 import Krea2; from mflux.models.z_image import ZImage; import huggingface_hub; print("mflux", m.version("mflux"))'
 install "$ROOT/flux3/bin/python" "$FLUX3" "$PILLOW" "$TORCH"
 "$ROOT/flux3/bin/python" -c 'import importlib.metadata as m; from flux3_mlx import Flux3Klein; import mlx_vlm, torch; from transformers import pipeline; print("flux3-mlx", m.version("flux3-mlx"))'
+# ltx-2-mlx needs Python 3.11; uv brings 3.12, a Python found here may be older.
+if [ -z "$BASE" ] || "$BASE" -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null; then
+  install "$ROOT/ltx/bin/python" \
+    "ltx-core-mlx @ $LTX_GIT#subdirectory=packages/ltx-core-mlx" \
+    "ltx-pipelines-mlx @ $LTX_GIT#subdirectory=packages/ltx-pipelines-mlx" "$PILLOW"
+  "$ROOT/ltx/bin/python" -c 'import importlib.metadata as m; from ltx_pipelines_mlx.distilled import DistilledPipeline; import huggingface_hub; print("ltx-2-mlx", m.version("ltx-pipelines-mlx"))'
+  [ -x "$ROOT/ltx/bin/ltx-2-mlx" ] || { echo "ltx-2-mlx fehlt in $ROOT/ltx/bin" >&2; exit 1; }
+  command -v ffmpeg >/dev/null 2>&1 || [ -x /opt/homebrew/bin/ffmpeg ] || echo "Hinweis: ffmpeg fehlt (brew install ffmpeg); ohne macht ltx-2-mlx kein Video."
+else
+  echo "Hinweis: ltx-2-mlx braucht Python 3.11 oder neuer (brew install uv); Videos gehen sonst nicht."
+fi
 
 cp "$HERE"/worker/*.py "$ROOT/worker/"
 if [ ! -f "$ROOT/worker.json" ]; then

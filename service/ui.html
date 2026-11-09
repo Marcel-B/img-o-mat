@@ -156,6 +156,26 @@
   .pictures .pending .frame { aspect-ratio: var(--ratio, 1); background: linear-gradient(100deg, var(--sunken) 30%, var(--line) 50%, var(--sunken) 70%) 0 0 / 300% 100%; animation: shimmer 1.6s linear infinite; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
   @keyframes shimmer { to { background-position: -150% 0; } }
   @media (prefers-reduced-motion: reduce) { .pictures .pending .frame { animation: none; } .bar > div { transition: none; } }
+  .videogrid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+  @media (min-width: 900px) { .videogrid { grid-template-columns: minmax(0, 1fr) 20rem; } }
+  .video textarea { width: 100%; min-height: 84px; margin: 4px 0 10px; }
+  .slots { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 160px)); margin-bottom: 12px; }
+  .slot { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .slot .thumb { position: relative; width: 100%; aspect-ratio: 1; border-radius: 10px; border: 1.5px dashed var(--line-strong); background: var(--sunken); display: grid; place-items: center; overflow: hidden; color: var(--muted); font-size: 13px; }
+  .slot .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+  .slot .thumb .tag { position: absolute; left: 6px; bottom: 6px; font-size: 11px; font-weight: 650; background: rgba(0, 0, 0, .62); color: #fff; border-radius: 5px; padding: 1px 6px; }
+  .slot .row { flex-wrap: wrap; }
+  .slot .row button { padding-inline: 10px; }
+  .audio { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+  .audio input { width: auto; margin: 0; }
+  .slot .thumb.filled { border-style: solid; border-color: var(--line); }
+  .slot .thumb.dropping { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .slot .row { gap: 6px; }
+  .clips { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+  .clips figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+  .clips video { width: 100%; display: block; background: #000; }
+  .clips figcaption { padding: 8px 12px; font-size: 12.5px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+  .clips figcaption a { margin-left: auto; }
   .empty { border: 1.5px dashed var(--line-strong); border-radius: var(--radius); padding: 48px 20px; text-align: center; color: var(--muted); }
   .empty b { display: block; color: var(--text); font-size: 15px; margin-bottom: 4px; }
 
@@ -228,6 +248,7 @@
     <div class="brand">img-o-mat</div>
     <nav class="tabs" aria-label="Bereiche">
       <a href="#malen" data-view="malen">Malen</a>
+      <a href="#video" data-view="video">Video</a>
       <a href="#modelle" data-view="modelle">Modelle</a>
       <a href="#loras" data-view="loras">LoRAs <span class="count" id="loraCount" hidden></span></a>
       <a href="#galerie" data-view="galerie">Galerie <span class="count" id="galleryCount" hidden></span></a>
@@ -295,6 +316,55 @@
     </div>
   </section>
 
+  <section id="view-video" class="video" data-view-panel="video" hidden>
+    <div class="view-head">
+      <div><h1>Video</h1><p>Ein kurzer Clip mit LTX-2.3. Ein Bild am Anfang, eins am Ende oder beide: Der Clip beginnt genau mit dem ersten und läuft auf das letzte zu. Rechne mit 5 bis 20 Minuten.</p></div>
+    </div>
+    <div class="videogrid">
+      <div class="card">
+        <div class="slots">
+          <div class="slot" data-slot="first"><div class="thumb" id="slotFirst"><span>Anfang</span></div>
+            <div class="row"><button data-pick="first">Bild wählen</button><button data-clear="first" hidden>Entfernen</button></div></div>
+          <div class="slot" data-slot="last"><div class="thumb" id="slotLast"><span>Ende</span></div>
+            <div class="row"><button data-pick="last">Bild wählen</button><button data-clear="last" hidden>Entfernen</button></div></div>
+          <input type="file" id="slotFile" accept="image/*" hidden>
+        </div>
+        <label for="videoPrompt">Was passiert</label>
+        <textarea id="videoPrompt" maxlength="2000" placeholder="she slowly turns her head toward the camera, embers drifting, firelight flickering, steady shot"></textarea>
+        <div class="row promptfoot">
+          <button class="primary" id="videoGo">Video machen</button>
+          <button id="videoCancel" hidden>Abbrechen</button>
+          <div class="progress">
+            <div id="videoState" class="muted"></div>
+            <div class="bar" id="videoBar" hidden><div></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="field"><label for="videoModel">Modell</label><select id="videoModel"></select></div>
+        <div class="field pair">
+          <div><label for="videoSize">Größe</label>
+            <select id="videoSize">
+              <option value="768x768">768 × 768 · 1:1</option>
+              <option value="1024x576">1024 × 576 · 16:9</option>
+              <option value="576x1024">576 × 1024 · 9:16</option>
+              <option value="512x512">512 × 512 · klein</option>
+            </select></div>
+          <div><label for="videoFrames">Länge</label>
+            <select id="videoFrames"><option value="49">2 s</option><option value="97" selected>4 s</option><option value="121">5 s</option></select></div>
+        </div>
+        <div class="field pair">
+          <div><label for="videoQuality">Qualität</label>
+            <select id="videoQuality"><option value="fast">schnell (11 Schritte)</option><option value="high">gut (33 Schritte, langsamer)</option></select></div>
+          <div><label for="videoSeed">Seed</label><input id="videoSeed" inputmode="numeric" placeholder="zufällig"></div>
+        </div>
+        <label class="audio"><input type="checkbox" id="videoAudio" checked>mit Ton</label>
+      </div>
+    </div>
+    <div class="group-head"><h2>Clips</h2><span class="count">bleiben nur auf dieser Seite: Herunterladen, was du behalten willst</span></div>
+    <div class="clips" id="clips"><div class="empty" id="clipsEmpty"><b>Noch keine Clips</b>Fertige Clips erscheinen hier.</div></div>
+  </section>
+
   <section id="view-modelle" data-view-panel="modelle" hidden>
     <div class="view-head">
       <div><h1>Modelle</h1><p>Heruntergeladen wird nur auf Knopfdruck, vorher prüft der Dienst den Platz.</p></div>
@@ -347,6 +417,7 @@
     <a id="previewDownload" download>Herunterladen</a>
     <button class="save" id="previewSave">Speichern</button>
     <button id="previewRef" title="Neben den Prompt legen, um damit weiterzumalen">Als Vorlage</button>
+    <button id="previewVideo" title="Als erstes und/oder letztes Bild eines Videoclips nehmen">Für Video</button>
     <button id="previewRefine" title="Mit einem Modell, das über Bilder malt (Krea 2 Turbo), noch einmal darübermalen: gleicher Aufbau, mehr Details">Verfeinern</button>
     <button id="previewReuse" title="Prompt, Modell, Größe, Seed, LoRAs und Vorlagen in die Malen-Felder übernehmen">Übernehmen</button>
     <button class="remove" id="previewDelete">Löschen</button>
@@ -384,8 +455,8 @@ async function api(path, options = {}) {
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-// Views live in the address (#malen, #modelle, #loras, #galerie) so a reload or a bookmark keeps the place.
-const views = ['malen', 'modelle', 'loras', 'galerie'];
+// Views live in the address (#malen, #video, #modelle, #loras, #galerie) so a reload or a bookmark keeps the place.
+const views = ['malen', 'video', 'modelle', 'loras', 'galerie'];
 function showView() {
   const view = views.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'malen';
   document.querySelectorAll('[data-view-panel]').forEach(panel => { panel.hidden = panel.dataset.viewPanel !== view; });
@@ -437,6 +508,7 @@ function renderModels() {
   $('models').innerHTML = models.map(modelCard).join('') || '<div class="empty">Keine Modelle.</div>';
   // Video models only wait on the T7 for now; they never reach the painting form.
   $('videoModels').innerHTML = videoModels.map(modelCard).join('') || '<div class="empty">Keine Videomodelle.</div>';
+  renderVideoModels();
   const chosen = $('model').value;
   $('model').innerHTML = models.map(m => `<option value="${esc(m.id)}" ${m.available ? '' : 'disabled'}>${esc(m.label)}${m.available ? (m.downloaded ? '' : ' (lädt beim ersten Bild)') : ' (nicht verfügbar)'}</option>`).join('');
   if (chosen && models.some(m => m.id === chosen)) $('model').value = chosen;
@@ -1110,6 +1182,184 @@ promptbar.addEventListener('drop', event => {
   addRefs(event.dataTransfer.files);
 });
 $('paint').addEventListener('click', paint);
+
+// Video: a clip from a prompt and up to two pictures, the first frame and the last. The clip comes back whole at the
+// end and lives only on this page, like a painted picture.
+const slots = { first: null, last: null };
+let videoJob = null, pickingSlot = null;
+
+function videoReason(m) {
+  if (!m.available) return m.unavailable;
+  if (!m.ready) return m.notReady;
+  if (!m.downloaded) return 'noch nicht heruntergeladen (Modelle → Videos)';
+  return '';
+}
+
+function renderVideoModels() {
+  const usable = videoModels.filter(m => m.paints);
+  const chosen = $('videoModel').value;
+  $('videoModel').innerHTML = usable.map(m => {
+    const why = videoReason(m);
+    return `<option value="${esc(m.id)}" ${why ? 'disabled' : ''}>${esc(m.label)}${why ? ' (' + esc(why) + ')' : ''}</option>`;
+  }).join('') || '<option value="">kein Videomodell</option>';
+  if (chosen && usable.some(m => m.id === chosen)) $('videoModel').value = chosen;
+  const ready = usable.find(m => !videoReason(m));
+  if (!$('videoModel').value && ready) $('videoModel').value = ready.id;
+  const picked = usable.find(m => m.id === $('videoModel').value);
+  if (!videoJob) $('videoState').textContent = picked && videoReason(picked) ? videoReason(picked) : '';
+}
+
+function renderSlot(at) {
+  const slot = slots[at], box = $(at === 'first' ? 'slotFirst' : 'slotLast');
+  box.classList.toggle('filled', !!slot);
+  const name = at === 'first' ? 'Anfang' : 'Ende';
+  box.innerHTML = slot ? (slot.url ? `<img src="${slot.url}" alt=""><span class="tag">${name}</span>` : '<span>lädt …</span>') : `<span>${name}</span>`;
+  document.querySelector(`[data-clear="${at}"]`).hidden = !slot;
+  if (slot?.error) $('videoState').innerHTML = `<span class="danger">${esc(slot.error)}</span>`;
+}
+
+function setSlot(at, blob) {
+  const slot = { url: null, sha: null, error: null };
+  slots[at] = slot;
+  slot.ready = (async () => {
+    const small = await shrink(blob);
+    slot.url = URL.createObjectURL(small.blob);
+    renderSlot(at);
+    const answer = await api('/v1/files', { method: 'POST', headers: { 'content-type': 'image/jpeg', 'x-llm-app': 'img-o-mat' }, body: small.blob });
+    slot.sha = answer.sha256;
+  })().catch(error => { slot.error = error.message; }).finally(() => renderSlot(at));
+  return slot.ready;
+}
+
+document.querySelectorAll('[data-pick]').forEach(button => button.addEventListener('click', () => {
+  pickingSlot = button.dataset.pick;
+  $('slotFile').value = '';
+  $('slotFile').click();
+}));
+document.querySelectorAll('[data-clear]').forEach(button => button.addEventListener('click', () => {
+  slots[button.dataset.clear] = null;
+  renderSlot(button.dataset.clear);
+}));
+$('slotFile').addEventListener('change', () => { const file = $('slotFile').files[0]; if (file && pickingSlot) setSlot(pickingSlot, file); });
+document.querySelectorAll('.slot').forEach(slot => {
+  const box = slot.querySelector('.thumb');
+  slot.addEventListener('dragover', event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); box.classList.add('dropping'); } });
+  slot.addEventListener('dragleave', () => box.classList.remove('dropping'));
+  slot.addEventListener('drop', event => {
+    box.classList.remove('dropping');
+    const file = [...event.dataTransfer.files].find(f => f.type.startsWith('image/'));
+    if (!file) return;
+    event.preventDefault();
+    setSlot(slot.dataset.slot, file);
+  });
+});
+
+const videoStages = { queued: 'wartet', sending: 'überträgt die Bilder', loading: 'lädt LTX', painting: 'filmt', saving: 'schreibt das Video' };
+
+async function makeVideo() {
+  if ($('videoGo').disabled) return;
+  const prompt = $('videoPrompt').value.trim();
+  if (!prompt) { $('videoState').textContent = 'Erst beschreiben, was passieren soll.'; $('videoPrompt').focus(); return; }
+  if (!$('videoModel').value) { $('videoState').textContent = 'Kein Videomodell bereit.'; return; }
+  $('videoGo').disabled = true;
+  const used = Object.entries(slots).filter(([, s]) => s);
+  try { await Promise.all(used.map(([, s]) => s.ready)); } catch {}
+  if (used.some(([, s]) => !s.sha)) { $('videoState').innerHTML = '<span class="danger">Ein Bild ist nicht angekommen; wähle es neu.</span>'; $('videoGo').disabled = false; return; }
+  const body = {
+    model: $('videoModel').value, prompt, size: $('videoSize').value, frames: Number($('videoFrames').value),
+    quality: $('videoQuality').value, audio: $('videoAudio').checked, stream: true, creator: 'img-o-mat',
+    images: used.map(([at, s]) => ({ file: s.sha, at })),
+  };
+  if ($('videoSeed').value.trim()) body.seed = Number($('videoSeed').value);
+  try { localStorage.setItem('img-o-mat.video', JSON.stringify({ prompt, size: body.size, frames: body.frames, quality: body.quality })); } catch {}
+  $('videoCancel').hidden = false; $('videoBar').hidden = false;
+  $('videoBar').firstElementChild.style.width = '0';
+  $('videoState').textContent = 'wird angefragt …';
+  const started = Date.now();
+  try {
+    const response = await fetch('/v1/videos/generations', { method: 'POST', headers: { 'content-type': 'application/json', 'x-llm-app': 'img-o-mat' }, body: JSON.stringify(body) });
+    if (!response.ok) throw new Error((await response.json()).error?.message || `HTTP ${response.status}`);
+    videoJob = response.headers.get('x-img-job');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '', seed = body.seed;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let cut;
+      while ((cut = buffer.indexOf('\n\n')) >= 0) {
+        const chunk = buffer.slice(0, cut); buffer = buffer.slice(cut + 2);
+        const name = /^event: (.*)$/m.exec(chunk)?.[1];
+        const data = /^data: (.*)$/m.exec(chunk)?.[1];
+        if (!name || !data) continue;
+        const event = JSON.parse(data);
+        const minutes = Math.floor((Date.now() - started) / 60000);
+        if (name === 'started') seed = event.seed;
+        if (name === 'queued') $('videoState').textContent = `wartet, Platz ${event.place}${event.running ? ', gerade malt ' + event.running : ''}`;
+        if (name === 'progress') {
+          $('videoState').textContent = `${videoStages[event.stage] || event.stage} ${Math.round(event.fraction * 100)} % · ${minutes} min`;
+          $('videoBar').firstElementChild.style.width = `${Math.round(event.fraction * 100)}%`;
+        }
+        if (name === 'video') addClip(event, body, seed);
+        if (name === 'done') {
+          const took = Math.round((Date.now() - started) / 1000);
+          $('videoState').textContent = `fertig nach ${took < 90 ? took + ' s' : Math.round(took / 60) + ' min'}`;
+          $('videoBar').hidden = true;
+        }
+        if (name === 'error') throw new Error(event.error.message);
+      }
+    }
+  } catch (error) {
+    $('videoState').innerHTML = `<span class="danger">${esc(error.message)}</span>`;
+    $('videoBar').hidden = true;
+  } finally {
+    $('videoGo').disabled = false; $('videoCancel').hidden = true; videoJob = null;
+  }
+}
+
+function addClip(data, body, seed) {
+  const bytes = Uint8Array.from(atob(data.b64_mp4), c => c.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'video/mp4' }));
+  const figure = document.createElement('figure');
+  const seconds = Math.round((body.frames - 1) / 24);
+  figure.innerHTML = `<video src="${url}" controls loop playsinline></video>
+    <figcaption><span>${esc(body.model)} · ${seconds} s · ${esc(body.size)} · Seed ${data.seed ?? seed}</span>
+      <a href="${url}" download="img-o-mat-${esc(body.model)}-${data.seed ?? seed}.mp4">Herunterladen</a>
+      <span class="prompt">${esc(body.prompt)}</span></figcaption>`;
+  $('clipsEmpty').hidden = true;
+  $('clips').prepend(figure);
+}
+
+// From the preview: the picture becomes the clip's last frame, or its first when the last is taken already.
+$('previewVideo').addEventListener('click', async () => {
+  const figure = shown;
+  if (!figure) return;
+  try {
+    const response = await fetch(figure.dataset.full || figure.querySelector('img').src);
+    if (!response.ok) throw new Error(`Das Bild kam nicht (HTTP ${response.status}).`);
+    const blob = await response.blob();
+    const at = slots.last ? 'first' : 'last';
+    $('preview').close();
+    location.hash = '#video';
+    setSlot(at, blob);
+  } catch (error) { alert(error.message); }
+});
+$('videoGo').addEventListener('click', makeVideo);
+$('videoCancel').addEventListener('click', () => videoJob && api(`/v1/jobs/${videoJob}`, { method: 'DELETE' }).catch(() => {}));
+$('videoModel').addEventListener('change', renderVideoModels);
+$('videoPrompt').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); makeVideo(); }
+});
+try {
+  const kept = JSON.parse(localStorage.getItem('img-o-mat.video') || 'null');
+  if (kept) {
+    $('videoPrompt').value = kept.prompt || '';
+    for (const [id, value] of [['videoSize', kept.size], ['videoFrames', kept.frames], ['videoQuality', kept.quality]]) {
+      if (value != null && [...$(id).options].some(o => o.value === String(value))) $(id).value = String(value);
+    }
+  }
+} catch {}
 $('prompt').addEventListener('keydown', event => {
   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); $('promptDialog').close(); paint(); }
 });

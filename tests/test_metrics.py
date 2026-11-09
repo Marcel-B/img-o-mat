@@ -58,7 +58,7 @@ class MetricsTest(unittest.TestCase):
     def setUpClass(cls):
         cls.root = tempfile.mkdtemp(prefix="img-o-mat-metrics-")
         with open(os.path.join(cls.root, "worker.json"), "w") as out:
-            json.dump({"python": sys.executable, "flux3Python": sys.executable, "scripts": FAKE}, out)
+            json.dump({"python": sys.executable, "flux3Python": sys.executable, "ltxPython": sys.executable, "scripts": FAKE}, out)
         os.environ["IMG_O_MAT_SOURCE_WORKER"] = os.path.join(ROOT, "worker")
         cls.loki = HTTPServer(("127.0.0.1", 0), FakeLoki)
         threading.Thread(target=cls.loki.serve_forever, daemon=True).start()

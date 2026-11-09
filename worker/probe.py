@@ -68,7 +68,8 @@ def main() -> int:
         {
             "host": platform.node(),
             "memoryGb": memory_gb(),
-            "runners": {"mflux": os.path.exists(values["python"]), "flux3-mlx": os.path.exists(values["flux3Python"])},
+            "runners": {"mflux": os.path.exists(values["python"]), "flux3-mlx": os.path.exists(values["flux3Python"]),
+                        "ltx-2-mlx": os.path.exists(values["ltxPython"])},
             "downloaded": {
                 repo: os.path.isdir(os.path.join(hub, "models--" + repo.replace("/", "--"), "snapshots"))
                 for repo in asked.get("repos") or []

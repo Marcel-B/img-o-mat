@@ -67,18 +67,21 @@ class Notifier:
         if len(prompt) > PROMPT_CHARS:
             prompt = prompt[: PROMPT_CHARS - 1].rstrip() + "…"
         message = {"topic": self.settings.get("topic") or "img-o-mat"}
+        video = job.request.get("kind") == "video"
         if job.error:
-            message.update(title=f"Bild fehlgeschlagen ({model})", priority=4, tags=["warning", "img-o-mat"],
+            message.update(title=f"{'Video' if video else 'Bild'} fehlgeschlagen ({model})", priority=4, tags=["warning", "img-o-mat"],
                            message=f"{job.error[1]}\n\n{job.app}: {prompt}")
         else:
             count = len(job.results)
             seconds = sum((r.get("loadSeconds") or 0) + (r.get("paintSeconds") or 0) for r in job.results)
             took = f" in {seconds / 60:.0f} min" if seconds >= 90 else f" in {seconds:.0f} s" if seconds else ""
-            message.update(title=f"{count} Bilder fertig ({model})" if count > 1 else f"Bild fertig ({model})",
-                           priority=3, tags=["white_check_mark", "img-o-mat"],
-                           message=f"{job.app}{took}: {prompt}",
-                           images=[{"data": base64.b64encode(r["jpeg"]).decode("ascii"),
-                                    "filename": f"{job.id}-{index + 1}.jpg"} for index, r in enumerate(job.results)])
+            title = f"Video fertig ({model})" if video else f"{count} Bilder fertig ({model})" if count > 1 else f"Bild fertig ({model})"
+            message.update(title=title, priority=3, tags=["white_check_mark", "img-o-mat"],
+                           message=f"{job.app}{took}: {prompt}")
+            # A clip is too big for a message; it waits on the page.
+            if not video:
+                message["images"] = [{"data": base64.b64encode(r["jpeg"]).decode("ascii"), "filename": f"{job.id}-{index + 1}.jpg"}
+                                     for index, r in enumerate(job.results)]
         if click := self.settings.get("click"):
             message["click"] = click
         return message
