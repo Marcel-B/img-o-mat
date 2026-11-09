@@ -148,7 +148,7 @@ class ServiceTest(unittest.TestCase):
         digest = hashlib.sha256(reference).hexdigest()
         self.assertEqual(self.call("POST", "/v1/files", raw=reference)[0], 201)
         keep = {"b64_json": picture, "model": "klein-4b", "seed": 33, "size": "1024x1024", "prompt": "a fox in a jersey",
-                "paintedPrompt": "a red fox wearing a football jersey",
+                "paintedPrompt": "a red fox wearing a football jersey", "loadSeconds": 12.34, "paintSeconds": "lang",
                 "loras": [{"name": "trikot", "label": "Trikot", "strength": 0.8}, {"no": "name"}],
                 "references": [{"file": digest, "role": "figure", "strength": None},
                                {"file": "0" * 64, "role": "start", "strength": 0.5}]}
@@ -158,6 +158,9 @@ class ServiceTest(unittest.TestCase):
         entry = next(p for p in listed["pictures"] if p["name"] == saved["name"])
         self.assertEqual(entry["loras"], [{"name": "trikot", "label": "Trikot", "strength": 0.8}])
         self.assertEqual(entry["paintedPrompt"], "a red fox wearing a football jersey")
+        # The time it took comes along as a number; anything else is left out.
+        self.assertEqual(entry["loadSeconds"], 12.3)
+        self.assertNotIn("paintSeconds", entry)
         # The second was gone from the service: named, without a picture.
         self.assertEqual(entry["references"], [{"role": "figure", "strength": None, "sha256": digest},
                                                {"role": "start", "strength": 0.5}])
@@ -194,6 +197,13 @@ class ServiceTest(unittest.TestCase):
         _, page, _ = self.call("GET", "/")
         page = page.decode()
         for part in ('id="previewSave"', 'data-view="galerie"', 'id="galleryGrid"', "'/v1/gallery'"):
+            self.assertIn(part, page)
+
+    def test_the_page_steps_through_clips_and_says_how_long_it_took(self):
+        _, page, _ = self.call("GET", "/")
+        page = page.decode()
+        for part in ('id="previewClip"', "['pictures', 'galleryGrid', 'clips']", "gefilmt in ", "['Dauer',",
+                     "loadSeconds: meta.loadSeconds, paintSeconds: meta.paintSeconds"):
             self.assertIn(part, page)
 
     def test_paints_a_picture(self):
