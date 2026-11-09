@@ -154,6 +154,10 @@
   .pictures .enlarge { position: absolute; top: 8px; right: 8px; width: 34px; height: 34px; padding: 0; border-radius: 8px; border: 0; background: rgba(0, 0, 0, .55); color: #fff; font-size: 18px; line-height: 34px; }
   .pictures .enlarge:hover, .pictures .enlarge:focus-visible { background: rgba(0, 0, 0, .8); }
   .pictures .pending .frame { aspect-ratio: var(--ratio, 1); background: linear-gradient(100deg, var(--sunken) 30%, var(--line) 50%, var(--sunken) 70%) 0 0 / 300% 100%; animation: shimmer 1.6s linear infinite; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
+  .pictures .pending .frame .enlarge { font-size: 20px; }
+  .pictures .pending.waiting .frame { animation: none; background: var(--sunken); }
+  .pictures .pending.failed .frame { animation: none; background: var(--sunken); padding: 16px 48px 16px 16px; text-align: center; }
+  .pictures .pending .frame .what { padding: 0 44px; text-align: center; }
   @keyframes shimmer { to { background-position: -150% 0; } }
   @media (prefers-reduced-motion: reduce) { .pictures .pending .frame { animation: none; } .bar > div { transition: none; } }
   .videogrid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); align-items: start; }
@@ -438,7 +442,7 @@
 </dialog>
 <script>
 const $ = id => document.getElementById(id);
-let models = [], videoModels = [], loras = [], current = null;
+let models = [], videoModels = [], loras = [], lastStatus = null;
 // Pictures for the next painting, in order: {id, url, width, height, sha, error, ready}.
 let refs = [], refSeq = 0;
 // Every uploaded picture's small copy by its hash, so a painted picture can show what it was painted from after the
@@ -691,6 +695,7 @@ function renderLoras(list) {
 }
 
 function renderStatus(status) {
+  lastStatus = status;
   const probe = status.worker.probe;
   $('workerBox').className = 'status ' + (probe ? 'ok' : 'bad');
   $('worker').innerHTML = probe
@@ -701,6 +706,8 @@ function renderStatus(status) {
   const parts = [];
   if (p.running) parts.push(`<div class="now">Jetzt: ${line(p.running)}</div>`);
   p.queue.forEach((job, i) => parts.push(`<div>${i + 1}. ${line(job)}</div>`));
+  // The page's jobs the service does not know yet come after its own line.
+  jobs.filter(j => j.state === 'waiting').forEach((job, i) => parts.push(`<div>${p.queue.length + i + 1}. img-o-mat · ${esc(job.body.model)} · auf dieser Seite</div>`));
   if (!parts.length) parts.push('<div>Nichts zu tun.</div>');
   if (p.recent.length) parts.push('<div class="recent">Zuletzt: ' + p.recent.slice(0, 5).map(r => `${esc(r.app)} ${esc(r.model)} ${r.error ? '<span class="danger">' + esc(r.error) + '</span>' : '✓'}`).join(' · ') + '</div>');
   $('queue').innerHTML = parts.join('');
@@ -735,24 +742,90 @@ function updateEmpty() {
   $('picturesEmpty').hidden = !!$('pictures').children.length;
 }
 
-// Placeholders hold the spot of the pictures still being painted, in the size that was asked for.
-function placeholders(body) {
+// The page's own line of paintings, so the next ones can be prepared while one paints: each with its own prompt,
+// model, LoRAs and pictures as they were when Malen was pressed. The one painting and the next are with the service
+// already (so the Mac goes on without a pause, and the autodeploy sees work waiting and does not restart the service
+// between two); the rest wait here, since each stream holds a connection and a browser gives a page only six over
+// HTTP/1.1. The next goes out only once the service took the one before, so the order stays the order of Malen.
+// Closing the page cancels them all, as before: the pictures live only here.
+const SENT_AHEAD = 2;
+let jobs = [], jobSeq = 0, note = '';
+
+const jobFigures = job => [...document.querySelectorAll(`#pictures figure.pending[data-job="${job.id}"]`)];
+
+// Placeholders hold the spot of the pictures still to be painted, in the size that was asked for.
+function placeholders(job) {
+  const body = job.body;
   const [w, h] = body.size.split('x').map(Number);
   for (let i = 0; i < body.n; i++) {
     const figure = document.createElement('figure');
     figure.className = 'pending';
+    figure.dataset.job = job.id;
     figure.style.setProperty('--ratio', `${w} / ${h}`);
-    figure.innerHTML = `<div class="frame">wird gemalt …</div><figcaption>${esc(body.model)}</figcaption>`;
+    const label = models.find(m => m.id === body.model)?.label || body.model;
+    figure.innerHTML = `<div class="frame"><span class="what"></span><button class="enlarge" data-drop-job="${job.id}" title="${body.n > 1 ? `Diesen Auftrag (${body.n} Bilder) abbrechen` : 'Dieses Bild abbrechen'}" aria-label="Abbrechen">×</button></div>
+      <figcaption>${esc(label)}${refCaption(body)}<span class="prompt">${esc(body.prompt)}</span></figcaption>`;
     $('pictures').prepend(figure);
   }
+  renderPlaceholders(job);
   // The newest pictures come first; on wide screens the gallery scrolls on its own, so bring them into view.
   document.querySelector('.paint .gallery').scrollTop = 0;
   updateEmpty();
 }
 
-function dropPlaceholders() {
-  document.querySelectorAll('#pictures figure.pending').forEach(f => f.remove());
+function renderPlaceholders(job) {
+  const painting = job.state === 'painting';
+  const place = jobs.indexOf(job) + 1;
+  for (const figure of jobFigures(job)) {
+    figure.classList.toggle('waiting', !painting);
+    figure.querySelector('.what').textContent = painting ? 'wird gemalt …' : `wartet · ${place}. in der Reihe`;
+  }
+}
+
+// A job that broke keeps one card that says why, until it is closed; the rest of its placeholders go.
+function failPlaceholders(job, message) {
+  const left = jobFigures(job);
+  left.slice(1).forEach(f => f.remove());
+  if (left[0]) {
+    left[0].className = 'pending failed';
+    left[0].querySelector('.what').innerHTML = `<span class="danger">${esc(message)}</span>`;
+    left[0].querySelector('[data-drop-job]').title = 'Schließen';
+  }
   updateEmpty();
+}
+
+function dropPlaceholders(job) {
+  jobFigures(job).filter(f => !f.classList.contains('failed')).forEach(f => f.remove());
+  updateEmpty();
+}
+
+// The line below the prompt and the button: what the page's first job does, and how many come after it.
+function renderLine() {
+  const first = jobs[0];
+  const more = jobs.length - 1;
+  $('paint').textContent = $('promptPaint').textContent = jobs.length ? 'Einreihen' : 'Malen';
+  $('paint').title = jobs.length ? 'Kommt in die Warteschlange und wird gemalt, wenn die Bilder davor fertig sind' : '';
+  $('cancel').hidden = !first;
+  $('paintBar').hidden = !first || first.state !== 'painting';
+  if (!first) { $('paintState').innerHTML = note; return; }
+  let text;
+  if (first.state === 'painting') {
+    text = `${stages[first.stage] || first.stage || 'malt'} ${Math.round((first.fraction || 0) * 100)} %`;
+    $('paintBar').firstElementChild.style.width = `${Math.round((first.fraction || 0) * 100)}%`;
+  } else if (first.place) {
+    text = `wartet, Platz ${first.place}${first.runningApp ? ', gerade malt ' + first.runningApp : ''}`;
+  } else text = 'wird angefragt …';
+  $('paintState').textContent = text + (more ? ` · danach ${more === 1 ? 'ein Auftrag' : more + ' Aufträge'}` : '');
+  jobs.forEach(renderPlaceholders);
+  if (lastStatus) renderStatus(lastStatus);
+}
+
+function pump() {
+  const sent = jobs.filter(j => j.state !== 'waiting');
+  // Only once the service took every job sent before, so a later one cannot overtake.
+  if (sent.length >= SENT_AHEAD || sent.some(j => !j.server)) return;
+  const next = jobs.find(j => j.state === 'waiting');
+  if (next) run(next);
 }
 
 async function paint() {
@@ -765,7 +838,7 @@ async function paint() {
   if (takes && refs.some(r => !r.sha && !r.error)) {
     $('paint').disabled = true;
     $('paintState').textContent = 'Bilder werden noch hochgeladen …';
-    try { await Promise.all(refs.map(r => r.ready)); } finally { $('paint').disabled = false; }
+    try { await Promise.all(refs.map(r => r.ready)); } finally { $('paint').disabled = false; renderLine(); }
   }
   const usable = refs.slice(0, takes);
   if (usable.some(r => r.error)) { $('paintState').innerHTML = '<span class="danger">Ein Bild ist nicht angekommen; entferne es und füge es neu hinzu.</span>'; return; }
@@ -783,14 +856,24 @@ async function paint() {
   else if (usable.length) body.references = usable.map(r => ({ file: r.sha }));
   if (!body.size) body.size = '1024x1024';
   try { localStorage.setItem('img-o-mat.form', JSON.stringify({ model: body.model, prompt: body.prompt, size: body.size, n: body.n })); } catch {}
-  $('paint').disabled = true; $('cancel').hidden = false; $('paintBar').hidden = false;
-  $('paintBar').firstElementChild.style.width = '0';
-  $('paintState').textContent = 'wird angefragt …';
-  placeholders(body);
+  const job = { id: ++jobSeq, body, state: 'waiting' };
+  jobs.push(job);
+  note = '';
+  placeholders(job);
+  pump();
+  renderLine();
+}
+
+async function run(job) {
+  job.state = 'sent';
+  job.controller = new AbortController();
+  let ended = false;
   try {
-    const response = await fetch('/v1/images/generations', { method: 'POST', headers: { 'content-type': 'application/json', 'x-llm-app': 'img-o-mat' }, body: JSON.stringify(body) });
+    const response = await fetch('/v1/images/generations', { method: 'POST', headers: { 'content-type': 'application/json', 'x-llm-app': 'img-o-mat' }, body: JSON.stringify(job.body), signal: job.controller.signal });
     if (!response.ok) throw new Error((await response.json()).error?.message || `HTTP ${response.status}`);
-    current = response.headers.get('x-img-job');
+    job.server = response.headers.get('x-img-job');
+    if (job.cancelled) api(`/v1/jobs/${job.server}`, { method: 'DELETE' }).catch(() => {});
+    pump();
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -803,16 +886,33 @@ async function paint() {
         const chunk = buffer.slice(0, cut); buffer = buffer.slice(cut + 2);
         const name = /^event: (.*)$/m.exec(chunk)?.[1];
         const data = /^data: (.*)$/m.exec(chunk)?.[1];
-        if (name && data) handle(name, JSON.parse(data), body);
+        if (name && data) ended = handle(name, JSON.parse(data), job) || ended;
       }
     }
+    if (!ended && !job.cancelled) throw new Error('Die Verbindung zum Dienst ist abgerissen.');
   } catch (error) {
-    $('paintState').innerHTML = `<span class="danger">${esc(error.message)}</span>`;
-    $('paintBar').hidden = true;
+    if (!job.cancelled) {
+      note = `<span class="danger">${esc(error.message)}</span>`;
+      failPlaceholders(job, error.message);
+    }
   } finally {
-    $('paint').disabled = false; $('cancel').hidden = true; current = null;
-    dropPlaceholders();
+    jobs = jobs.filter(j => j !== job);
+    dropPlaceholders(job);
+    pump();
+    renderLine();
   }
+}
+
+// One job off the line: still here it just goes; with the service it is cancelled there, and its stream ends.
+function cancelJob(job) {
+  job.cancelled = true;
+  note = 'abgebrochen';
+  if (job.state === 'waiting') {
+    jobs = jobs.filter(j => j !== job);
+    dropPlaceholders(job);
+    renderLine();
+  } else if (job.server) api(`/v1/jobs/${job.server}`, { method: 'DELETE' }).catch(() => {});
+  // Not taken yet: the server's answer brings the id, and run() cancels it then.
 }
 
 function refCaption(body) {
@@ -823,12 +923,11 @@ function refCaption(body) {
 
 const stages = { queued: 'wartet', sending: 'überträgt Dateien', loading: 'lädt das Modell', painting: 'malt', checking: 'prüft den Inhalt' };
 
-function handle(name, data, body) {
-  if (name === 'queued') $('paintState').textContent = `wartet, Platz ${data.place}${data.running ? ', gerade malt ' + data.running : ''}`;
-  if (name === 'progress') {
-    $('paintState').textContent = `${stages[data.stage] || data.stage} ${Math.round(data.fraction * 100)} %`;
-    $('paintBar').firstElementChild.style.width = `${Math.round(data.fraction * 100)}%`;
-  }
+// One event of a job's stream; true when the job has ended (done or error).
+function handle(name, data, job) {
+  const body = job.body;
+  if (name === 'queued') { job.place = data.place; job.runningApp = data.running; }
+  if (name === 'progress') { job.state = 'painting'; job.stage = data.stage; job.fraction = data.fraction; }
   if (name === 'image') {
     const url = `data:image/jpeg;base64,${data.b64_json}`;
     const figure = document.createElement('figure');
@@ -842,13 +941,18 @@ function handle(name, data, body) {
     figure.style.setProperty('--ratio', body.size.replace('x', ' / '));
     figure.innerHTML = `<div class="frame"><img src="${url}" alt=""><button class="enlarge" data-enlarge title="Groß ansehen" aria-label="Groß ansehen">⤢</button></div>
       <figcaption>${esc(body.model)} · Seed ${data.seed} · ${data.paintSeconds ?? '?'} s${refCaption(body)}${data.revised_prompt ? '<span class="prompt">' + esc(data.revised_prompt) + '</span>' : ''}</figcaption>`;
-    // A finished picture takes the place of the last placeholder, so the order stays the order of painting.
-    const pending = [...document.querySelectorAll('#pictures figure.pending')];
+    // A finished picture takes the place of its job's last placeholder, so the order stays the order of painting.
+    const pending = jobFigures(job);
     if (pending.length) pending[pending.length - 1].replaceWith(figure); else $('pictures').prepend(figure);
     updateEmpty();
   }
-  if (name === 'done') { $('paintState').textContent = 'fertig'; $('paintBar').hidden = true; }
-  if (name === 'error') { $('paintState').innerHTML = `<span class="danger">${esc(data.error.message)}</span>`; $('paintBar').hidden = true; }
+  if (name === 'done') note = 'fertig';
+  if (name === 'error' && !job.cancelled) {
+    note = `<span class="danger">${esc(data.error.message)}</span>`;
+    failPlaceholders(job, data.error.message);
+  }
+  renderLine();
+  return name === 'done' || name === 'error';
 }
 
 // Painted pictures live only on this page (the service keeps none) until Speichern puts one into the gallery on the
@@ -1383,7 +1487,17 @@ $('prompt').addEventListener('input', promptCount);
 $('promptSmall').addEventListener('click', () => $('promptDialog').close());
 $('promptDone').addEventListener('click', () => $('promptDialog').close());
 $('promptPaint').addEventListener('click', () => { $('promptDialog').close(); paint(); });
-$('cancel').addEventListener('click', () => current && api(`/v1/jobs/${current}`, { method: 'DELETE' }).catch(() => {}));
+// Abbrechen stops the page's first job, the one painting or next; the × on a placeholder any one of them.
+$('cancel').addEventListener('click', () => jobs[0] && cancelJob(jobs[0]));
+$('pictures').addEventListener('click', event => {
+  const button = event.target.closest('[data-drop-job]');
+  if (!button) return;
+  const job = jobs.find(j => String(j.id) === button.dataset.dropJob);
+  if (job) cancelJob(job);
+  else { button.closest('figure').remove(); updateEmpty(); }
+});
+// Leaving the page cancels what it still waits for; ask first.
+window.addEventListener('beforeunload', event => { if (jobs.length) { event.preventDefault(); event.returnValue = ''; } });
 $('refresh').addEventListener('click', () => load(true));
 $('loraFile').addEventListener('change', () => {
   const file = $('loraFile').files[0];
