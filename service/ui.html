@@ -87,13 +87,15 @@
   @media (min-width: 960px) {
     body:has(.paint:not([hidden])) { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
     body:has(.paint:not([hidden])) main { flex: 1; min-height: 0; width: 100%; padding-bottom: 16px; }
-    .paint { height: 100%; grid-template-columns: 20rem minmax(0, 1fr); grid-template-rows: minmax(0, 2fr) minmax(0, 1fr); grid-template-areas: "side gallery" "side prompt"; align-items: stretch; }
+    .paint { height: 100%; grid-template-columns: 20rem minmax(0, 1fr); grid-template-rows: minmax(0, 2fr) minmax(auto, 1fr); grid-template-areas: "side gallery" "side prompt"; align-items: stretch; }
     .paint .side { min-height: 0; display: flex; flex-direction: column; }
     .paint .side > .card:first-child { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
     .paint .side .loras { flex: 0 1 auto; min-height: 4rem; max-height: none; }
     .paint .side > .card + .card { flex: none; max-height: 40%; overflow-y: auto; }
     .paint .gallery { min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius); }
-    .paint .promptbar { min-height: 0; display: flex; flex-direction: column; }
+    /* At least as tall as its fields and buttons need (the negative prompt adds a line): the pictures above give way,
+       rather than the card running over its own buttons on a laptop screen. */
+    .paint .promptbar { display: flex; flex-direction: column; }
     .paint .promptbar textarea { flex: 1; min-height: 3rem; resize: none; }
   }
   .promptbar textarea { min-height: 96px; }
@@ -129,10 +131,14 @@
   dialog.promptedit .row { justify-content: flex-end; gap: 10px; }
   dialog.promptedit .row .hint { margin: 0 auto 0 0; }
   @media (max-width: 640px) { dialog.promptedit { width: 100vw; height: 100vh; height: 100dvh; border: 0; border-radius: 0; padding: 12px; } dialog.promptedit .keys { display: none; } }
-  /* Only for models whose runner heeds one (GET /v1/models "negativePrompt"); small, the prompt stays the main field. */
-  .promptbar .negative { margin-top: 8px; }
-  .promptbar .negative label { display: flex; justify-content: space-between; gap: 8px; }
-  .promptbar .negative textarea, .paint .promptbar .negative textarea { min-height: 0; height: 3.4em; flex: none; resize: vertical; }
+  /* Only for models whose runner heeds one (GET /v1/models "negativePrompt"); one line beside its label, so the prompt
+     stays the main field. It moves into the large prompt's dialog with the prompt, two lines high there. */
+  .negative { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px 10px; margin-top: 8px; }
+  .negative label { margin: 0; }
+  .negative textarea, .paint .promptbar .negative textarea { min-height: 0; height: 2.4em; padding-top: 7px; padding-bottom: 7px; flex: none; resize: none; line-height: 1.35; }
+  dialog.promptedit .negative { margin: 0; }
+  dialog.promptedit .negative textarea { height: 4.4em; flex: none; }
+  @media (max-width: 640px) { .negative { grid-template-columns: minmax(0, 1fr); } }
   .promptbar.dropping { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .loras .check { align-items: flex-start; }
   .loras .check input { margin-top: 3px; }
@@ -284,8 +290,8 @@
       </div>
       <textarea id="prompt" maxlength="2000" placeholder="a red fox in fresh snow, morning light, 35 mm photo"></textarea>
       <div class="negative" id="negativeBox" hidden>
-        <label for="negative"><span>Negativprompt · was nicht ins Bild soll</span><span class="muted" id="negativeHint"></span></label>
-        <textarea id="negative" maxlength="2000" placeholder="blurry, watermark, text, extra fingers"></textarea>
+        <label for="negative" title="Was nicht ins Bild soll">Negativprompt</label>
+        <textarea id="negative" maxlength="2000" rows="1" placeholder="was nicht ins Bild soll: blurry, watermark, text, extra fingers"></textarea>
       </div>
       <div class="row promptfoot">
         <button class="primary" id="paint">Malen</button>
@@ -544,7 +550,8 @@ function renderPicks() {
   // The distilled models paint without CFG, where a negative prompt does nothing; the field shows only where it acts,
   // and its text stays for when such a model is picked again.
   $('negativeBox').hidden = !model?.negativePrompt;
-  $('negativeHint').textContent = model?.negativePrompt ? `${model.label} malt damit etwa doppelt so lange` : '';
+  // A line of its own would cost the prompt a line; the doubled time goes into the tooltip.
+  $('negative').title = model?.negativePrompt ? `Was nicht ins Bild soll. ${model.label} malt damit etwa doppelt so lange.` : '';
   renderRefs();
 }
 
@@ -1518,12 +1525,14 @@ $('prompt').addEventListener('keydown', event => {
 $('negative').addEventListener('keydown', event => {
   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); paint(); }
 });
-// The large prompt: the textarea itself moves into the dialog and back on every way out (Esc included).
+// The large prompt: the textarea itself moves into the dialog and back on every way out (Esc included), the negative
+// prompt below it (hidden where the model takes none, as in the small view).
 const promptHome = $('refs');
 function promptCount() { $('promptCount').textContent = $('prompt').value.length; }
 $('promptBig').addEventListener('click', () => {
   const field = $('prompt'), at = field.selectionStart, end = field.selectionEnd;
   $('promptSlot').after(field);
+  field.after($('negativeBox'));
   promptCount();
   $('promptDialog').showModal();
   field.focus();
@@ -1532,6 +1541,7 @@ $('promptBig').addEventListener('click', () => {
 $('promptDialog').addEventListener('close', () => {
   const field = $('prompt');
   promptHome.after(field);
+  field.after($('negativeBox'));
   field.focus({ preventScroll: true });
 });
 $('prompt').addEventListener('input', promptCount);
