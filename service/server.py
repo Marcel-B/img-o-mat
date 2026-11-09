@@ -9,7 +9,8 @@ which model and keeps it out of Tonwerk's way; Tonwerk-AI asks directly, first i
 
 The API, OpenAI's images API where it has one (README, "Schnittstelle"):
     GET    /v1/models                       the models, with what the Mac that paints can do
-    POST   /v1/models/<id>/download         start downloading one on the Mac that paints
+    GET    /v1/models?kind=video            the video models, which can only be downloaded for now
+    POST   /v1/models/<id>/download         start downloading one (image or video) on the Mac that paints
     POST   /v1/images/generations           paint; "stream": true for progress as server-sent events
     DELETE /v1/jobs/<id>                    cancel a picture
     HEAD   /v1/files/<sha256>, PUT ...      reference pictures (and LoRAs not in the library), once per file
@@ -169,6 +170,11 @@ class Service:
         states = {m["id"]: self.downloads.state(m["id"]) for m in self.catalogue.models}
         probe = self.probe(fresh)
         return [self.catalogue.describe(m, probe, self.link.probe_error, states[m["id"]]) for m in self.catalogue.models]
+
+    def video_models(self, fresh: bool = False) -> list[dict]:
+        states = {m["id"]: self.downloads.state(m["id"]) for m in self.catalogue.videos}
+        probe = self.probe(fresh)
+        return [self.catalogue.describe_video(m, probe, self.link.probe_error, states[m["id"]]) for m in self.catalogue.videos]
 
     def busy(self) -> dict:
         """What paints now, for Tonwerk before it claims the Mac's memory: pictures that came through the gate are
@@ -451,7 +457,9 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         elif path == "/v1/models":
-            self.send_json(200, {"object": "list", "data": service.models(fresh=query.get("fresh") == "1")})
+            fresh = query.get("fresh") == "1"
+            listed = service.video_models(fresh) if query.get("kind") == "video" else service.models(fresh)
+            self.send_json(200, {"object": "list", "data": listed})
         elif path == "/status":
             self.send_json(200, service.status())
         elif path == "/v1/busy":
@@ -510,7 +518,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         match = re.fullmatch(r"/v1/models/([^/]+)/download", path)
         if match:
-            model = service.catalogue.find(match[1])
+            model = service.catalogue.find(match[1]) or service.catalogue.find_video(match[1])
             if model is None:
                 raise RequestError(404, f"Unbekanntes Modell {match[1]}.")
             probe = service.probe(fresh=True)

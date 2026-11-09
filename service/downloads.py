@@ -1,5 +1,5 @@
 """Model downloads on the Mac that paints (worker/fetch.py), started by the page's button or the LLM gate's
-"Installieren". Never by themselves: a model is 15 to 35 GB on the T7. One at a time, the rest wait."""
+"Installieren". Never by themselves: a model is 15 to 35 GB on the T7, a video model up to 81. One at a time, the rest wait."""
 
 from __future__ import annotations
 
@@ -51,7 +51,8 @@ class Downloads:
             tail = []
             try:
                 process = self.link.start("fetch")
-                process.stdin.write((json.dumps({"repos": repos(model), "expectedGb": model["downloadGb"]}) + "\n").encode())
+                asked = {"repos": repos(model), "revisions": model.get("revisions") or {}, "expectedGb": model["downloadGb"]}
+                process.stdin.write((json.dumps(asked) + "\n").encode())
                 process.stdin.flush()
                 for raw in process.stdout:
                     line = raw.decode("utf-8", errors="replace").rstrip("\n")
