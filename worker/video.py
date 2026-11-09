@@ -173,7 +173,7 @@ def main() -> int:
     minimax = request.get("runner") == "minimax-h3-mlx"
     runner = "minimax-h3-mlx" if minimax else "ltx-2-mlx"
     emit({"event": "stage", "stage": "loading", "fraction": 0})
-    work = tempfile.mkdtemp(prefix="img-o-mat-video-")
+    work = os.environ.get("IMG_O_MAT_VIDEO_WORK") or tempfile.mkdtemp(prefix="img-o-mat-video-")
     try:
         raw = os.path.join(work, "clip.mp4")
         try:

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import tempfile
 
 # What the service reads as an event; everything else on stdout is the runner talking.
 PREFIX = "IMGOMAT "
@@ -46,6 +48,7 @@ def settings() -> dict:
         os.path.join("/Volumes", disk, "img-o-mat", "galerie") if disk else os.path.join(ROOT, "gallery"))
     return {
         "modelCache": cache,
+        "videoWork": expand(values.get("videoWork") or os.path.join(ROOT, "video-work")),
         "tokenFiles": [expand(values["tokenFile"])] if values.get("tokenFile") else [
             expand("~/.config/img-o-mat/huggingface.token"),
             # Tonwerk-AI's place from before the service, so the token need not move.
@@ -63,6 +66,48 @@ def settings() -> dict:
         # Tests put fake paint.py and fetch.py here.
         "scripts": expand(values.get("scripts") or HERE),
     }
+
+
+def cleanup_video_work(folder: str) -> None:
+    """Remove only managed video jobs whose launcher no longer exists, never active jobs."""
+    try:
+        with os.scandir(folder) as scan:
+            entries = list(scan)
+    except FileNotFoundError:
+        return
+    for entry in entries:
+        if not entry.name.startswith("img-o-mat-video-") or not entry.is_dir(follow_symlinks=False):
+            continue
+        try:
+            with open(os.path.join(entry.path, "owner-pid")) as file:
+                owner = int(file.read())
+            if owner <= 0:
+                continue
+            os.kill(owner, 0)
+        except ProcessLookupError:
+            shutil.rmtree(entry.path, ignore_errors=True)
+        except FileNotFoundError:
+            # A crash between mkdir and writing ownership can leave an empty directory.
+            try:
+                os.rmdir(entry.path)
+            except OSError:
+                pass
+        except (OSError, ValueError, OverflowError):
+            # Unknown ownership or an inaccessible process is not evidence that a job is dead.
+            continue
+
+
+def create_video_work(folder: str) -> str:
+    os.makedirs(folder, exist_ok=True)
+    cleanup_video_work(folder)
+    work = tempfile.mkdtemp(prefix="img-o-mat-video-", dir=folder)
+    try:
+        with open(os.path.join(work, "owner-pid"), "w") as file:
+            file.write(str(os.getpid()))
+    except BaseException:
+        shutil.rmtree(work, ignore_errors=True)
+        raise
+    return work
 
 
 def token(values: dict) -> str | None:
