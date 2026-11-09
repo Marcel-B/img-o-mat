@@ -378,6 +378,7 @@ class Service:
             "paintedPrompt": body.get("paintedPrompt"),
             "size": body.get("size"), "seed": seed if isinstance(seed, int) else None, "app": app,
             "creator": body.get("creator"), "loras": body.get("loras"),
+            "loadSeconds": body.get("loadSeconds"), "paintSeconds": body.get("paintSeconds"),
         }
         # The pictures it was painted from go along from the service's own copies (uploaded by hash for the painting),
         # so the page need not send them again; one pruned meanwhile is still named, without its picture.

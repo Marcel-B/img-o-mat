@@ -170,6 +170,10 @@ def save(asked: dict) -> dict:
     meta = {key: str(given[key])[:limit] for key, limit in META.items() if given.get(key) not in (None, "")}
     if isinstance(given.get("seed"), int):
         meta["seed"] = given["seed"]
+    # How long it took, as the worker measured it: loading the model and painting.
+    for key in ("loadSeconds", "paintSeconds"):
+        if number(given.get(key), 0, 7 * 86400) is not None:
+            meta[key] = round(number(given.get(key), 0, 7 * 86400), 1)
     if loras_of(given.get("loras")):
         meta["loras"] = loras_of(given.get("loras"))
     references = keep_references(path, asked.get("references"))
