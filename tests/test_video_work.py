@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -83,6 +84,41 @@ class VideoWorkTest(unittest.TestCase):
                         process.wait()
                     for stream in (process.stdin, process.stdout, process.stderr):
                         stream.close()
+
+
+    def test_launcher_ends_when_the_script_leaves_a_helper_behind(self):
+        # A helper that inherited stdout would keep the SSH connection, and with it the service, waiting.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / "scripts"
+            script.mkdir()
+            (script / "paint.py").write_text(
+                "import subprocess,sys\n"
+                "subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])\n"
+                "print('IMGOMAT {\"event\": \"stage\", \"stage\": \"checking\"}',flush=True)\n"
+                "sys.exit(1)\n"
+            )
+            (root / "worker.json").write_text(json.dumps({"scripts": str(script), "python": sys.executable,
+                                                          "runners": {"mflux": {"python": sys.executable}}}))
+            process = subprocess.Popen([sys.executable, str(WORKER / "launch.py"), "paint", "mflux"],
+                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                       env={**os.environ, "IMG_O_MAT_WORKER_ROOT": str(root)})
+            try:
+                process.stdin.write(b"{}\n")
+                process.stdin.flush()
+                result = []
+                reader = threading.Thread(target=lambda: result.append(process.stdout.read()), daemon=True)
+                reader.start()
+                reader.join(timeout=10)
+                self.assertFalse(reader.is_alive(), "stdout must end when the script ends")
+                self.assertIn(b"checking", result[0])
+                self.assertEqual(process.wait(timeout=5), 1)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    stream.close()
 
 
 if __name__ == "__main__":

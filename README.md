@@ -139,6 +139,8 @@ Als App zählen nur `tonwerk-ai`, `3d-o-mat` und `img-o-mat` (die Seite). Alle a
 
 Die Logzeilen gehen zusätzlich an Loki, wenn in `config.json` `"loki": {"url": "http://monitoring:3100", "host": "proxmox"}` steht. Die Labels sind `app=img-o-mat`, `host`, `level` und `source` (`painter`, `worker`, `downloads`, `loras`, `files`, `http`, `config`). `deploy/to-proxmox.sh` trägt das mit `LOKI_URL=http://monitoring:3100` ein. Ist Loki weg, werden die Zeilen verworfen und gezählt. Das Journal bleibt, wie es ist. Prompts stehen in keiner Zeile, weder dort noch in Loki.
 
+Hängt ein Bild, obwohl auf oi-o-mat nichts mehr malt, schreibt `systemctl kill -s USR1 img-o-mat` im Container, wo jeder Thread des Dienstes gerade steht, ins Journal (`journalctl -u img-o-mat`). Das vor einem Neustart ausführen, sonst ist die Spur weg.
+
 Das Dashboard und das Ziel liegen im Monitoring-Stack (Tonwerk-AI, `deploy/monitoring/`).
 
 ## Entwickeln

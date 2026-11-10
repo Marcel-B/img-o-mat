@@ -91,6 +91,13 @@ def run(script: str, python: str, folder: str) -> int:
 
         threading.Thread(target=watch, daemon=True).start()
         code = child.wait()
+        # Whatever the script left behind in its group (a helper process of torch or transformers, or a runner that
+        # was killed for memory before it could stop its helpers) still holds our stdout, and sshd keeps the
+        # connection open as long as anyone does: the service would wait for the timeout on a picture that ended.
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
     finally:
         if work:
             shutil.rmtree(work, ignore_errors=True)

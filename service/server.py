@@ -28,11 +28,13 @@ Plain Python 3.9, nothing to install: macOS's own python3 runs it.
 from __future__ import annotations
 
 import base64
+import faulthandler
 import json
 import os
 import random
 import re
 import select
+import signal
 import socket
 import sys
 import threading
@@ -758,6 +760,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> int:
     config = settings.load()
+    # `systemctl kill -s USR1 img-o-mat` writes every thread's stack to the journal: a picture that hangs after its
+    # runner ended (2026-11-10, Kaderwerk) can then be found without a restart taking the evidence with it.
+    faulthandler.register(signal.SIGUSR1, all_threads=True)
     Handler.service = Service(config)
     server = ThreadingHTTPServer((config.listen, config.port), Handler)
     server.daemon_threads = True
